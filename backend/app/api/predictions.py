@@ -17,6 +17,18 @@ from app.schemas.predictions import (
 
 router = APIRouter(prefix="/api", tags=["predictions"])
 
+# Fiscal quarter order: Q4=Jan-Mar (0), Q1=Apr-Jun (1), Q2=Jul-Sep (2), Q3=Oct-Dec (3)
+_FISCAL_ORDER = ["Q4", "Q1", "Q2", "Q3"]
+
+
+def _quarter_sort_key(quarter_str: str) -> int:
+    """Return a comparable int for fiscal-quarter strings, e.g. '2026-Q4' → 20260."""
+    try:
+        year, q = quarter_str.split("-")
+        return int(year) * 10 + _FISCAL_ORDER.index(q)
+    except (ValueError, IndexError):
+        return 0
+
 
 def _build_model_meta(site: str, db: Session) -> ModelMeta:
     """Build ModelMeta by reading the champion ModelRun for a site."""
@@ -65,8 +77,9 @@ def get_predictions(
     if business_unit:
         stmt = stmt.where(PredictionsCache.business_unit == business_unit)
 
-    stmt = stmt.order_by(PredictionsCache.target_quarter.asc())
     items = db.execute(stmt).scalars().all()
+    # Sort using fiscal calendar: Q4 (Jan-Mar) < Q1 (Apr-Jun) < Q2 (Jul-Sep) < Q3 (Oct-Dec)
+    items = sorted(items, key=lambda p: _quarter_sort_key(p.target_quarter))
 
     meta_site = site or (items[0].site if items else "")
     model_meta = _build_model_meta(meta_site, db) if meta_site else ModelMeta(site="")

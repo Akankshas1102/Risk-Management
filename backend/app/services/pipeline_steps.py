@@ -6,6 +6,12 @@ Each step function:
 - Returns a summary dict {sites_processed, rows_written, errors, ...}
 - Is idempotent: re-running produces no duplicates
 - Never catches exceptions — the orchestrator handles that
+
+Steps (in execution order):
+  step_risk_scores  — composite risk score per site per quarter
+  step_forecasters  — n-quarter-ahead predictions (Prophet / XGBoost)
+  step_backtest     — walk-forward 6-month holdout evaluation
+  step_drivers      — SHAP driver attribution + rules-based recommendations
 """
 
 from __future__ import annotations
@@ -337,6 +343,7 @@ def step_drivers(sf=None) -> dict:
                         driver_name=row["driver_name"], category=row["category"],
                         impact_score=row["impact_score"], trend=row["trend"],
                         pct_change_vs_last_qtr=row["pct_change_vs_last_qtr"],
+                        sparkline_data=row.get("sparkline_data"),
                         computed_at=row["computed_at"],
                     ))
                 # Recommendations: delete+insert per site+quarter
@@ -350,7 +357,9 @@ def step_drivers(sf=None) -> dict:
                         action_text=rec.action_text, priority=rec.priority,
                         impact_estimate=rec.impact_estimate or "",
                         suggested_owner=rec.suggested_owner or "",
-                        status="open", source=rec.source, created_at=now,
+                        status="open", source=rec.source,
+                        driver_link=rec.driver_link or "",
+                        created_at=now,
                     ))
                 session.commit()
 
@@ -364,4 +373,37 @@ def step_drivers(sf=None) -> dict:
         "driver_rows_written": driver_rows,
         "rec_rows_written": rec_rows,
         "errors": errors,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Step 3b — Walk-forward backtest (runs after forecasters, before drivers)
+# ---------------------------------------------------------------------------
+
+def step_backtest(sf=None) -> dict:
+    """
+    Run 6-month walk-forward holdout backtest for all sites and persist
+    results to backtest_results.
+
+    Delegates entirely to ``run_all_backtests()``.  Returns a summary dict
+    with keys: ok, skipped, errors, total_rows (rows written to DB).
+
+    A site is *skipped* (not *errored*) when it has insufficient history
+    for the holdout window (e.g. VLCTPP).
+
+    Parameters
+    ----------
+    sf : Unused — backtest module manages its own SSMSSession connections.
+         Accepted for API consistency with the other step functions.
+    """
+    # run_all_backtests handles its own DB connections via SSMSSession
+    from app.ml.backtest import run_all_backtests  # noqa: PLC0415
+
+    result = run_all_backtests()   # site_pairs=None → all sites from OL_INCIDENTS
+    # Normalise key names to match the step-result convention used by the orchestrator
+    return {
+        "sites_ok": result.get("ok", 0),
+        "sites_skipped": result.get("skipped", 0),
+        "errors": result.get("errors", 0),
+        "rows_written": result.get("total_rows", 0),
     }

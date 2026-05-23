@@ -11,5 +11,6 @@ class BacktestResult(SSMSBase):
     month = Column(String(10), nullable=False)   # "YYYY-MM"
     actual = Column(Float)
     predicted = Column(Float)
+    abs_pct_error = Column(Float)                # |actual - predicted| / actual * 100
     model_name = Column(String(50))
     computed_at = Column(DateTime)

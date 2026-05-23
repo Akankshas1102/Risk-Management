@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Column, DateTime, Float, String
+from sqlalchemy import BigInteger, Column, DateTime, Float, String, Text
 
 from app.models.ol_incidents import SSMSBase
 
@@ -14,6 +14,7 @@ class RiskDriver(SSMSBase):
     impact_score = Column(Float)                    # 0–100 normalised
     trend = Column(String(10))                      # up / down / flat
     pct_change_vs_last_qtr = Column(Float)
+    sparkline_data = Column(Text)                   # JSON array: last 6 monthly counts, e.g. "[2,5,3,0,7,4]"
     computed_at = Column(DateTime)
 
 
@@ -29,4 +30,5 @@ class Recommendation(SSMSBase):
     suggested_owner = Column(String(500))
     status = Column(String(50), default="open")
     source = Column(String(10), default="rules")    # rules / llm
+    driver_link = Column(String(500))               # category/driver that triggered this rule
     created_at = Column(DateTime)

@@ -25,6 +25,45 @@ from app.models.ol_incidents import OLIncident
 _MIN_YEAR = "2020"
 _DEFAULT_LAGS = [1, 3, 6, 12]
 
+# Module-level cache so every site in a training run shares one DB round-trip.
+_global_max_date_cache: Optional[pd.Timestamp] = None
+
+
+def get_global_max_date(session_factory=None) -> pd.Timestamp:
+    """
+    Return the latest (YEAR, MONTH) pair present in OL_INCIDENTS as a Timestamp.
+    Uses ORDER BY so MAX(YEAR)+MAX(MONTH) mis-combination is avoided.
+    Result is cached module-level for the lifetime of the process.
+    """
+    global _global_max_date_cache
+    if _global_max_date_cache is not None:
+        return _global_max_date_cache
+
+    sf = session_factory or SSMSSession
+    from sqlalchemy import cast, Integer as SAInteger, desc
+    with sf() as session:
+        row = session.execute(
+            select(
+                cast(OLIncident.YEAR, SAInteger).label("year"),
+                OLIncident.MONTH.label("month"),
+            )
+            .where(
+                OLIncident.YEAR >= _MIN_YEAR,
+                OLIncident.YEAR.isnot(None),
+                OLIncident.MONTH.isnot(None),
+            )
+            .order_by(
+                desc(cast(OLIncident.YEAR, SAInteger)),
+                desc(OLIncident.MONTH),
+            )
+            .limit(1)
+        ).first()
+    if row and row.year and row.month:
+        _global_max_date_cache = pd.Timestamp(year=int(row.year), month=int(row.month), day=1)
+    else:
+        _global_max_date_cache = pd.Timestamp.now().replace(day=1)
+    return _global_max_date_cache
+
 
 # ---------------------------------------------------------------------------
 # DB loaders
@@ -60,13 +99,19 @@ def _load_raw(
 # Series construction (exposed for unit tests — no DB dependency)
 # ---------------------------------------------------------------------------
 
-def _df_to_monthly_series(raw: pd.DataFrame) -> pd.DataFrame:
+def _df_to_monthly_series(
+    raw: pd.DataFrame,
+    pad_to: Optional[pd.Timestamp] = None,
+) -> pd.DataFrame:
     """
     Convert a raw incident rows DataFrame to a continuous [ds, y] monthly series.
 
     Parameters
     ----------
-    raw : DataFrame with at least YEAR (str/int) and MONTH (int) columns.
+    raw    : DataFrame with at least YEAR (str/int) and MONTH (int) columns.
+    pad_to : If set and later than the series' own max date, the series is
+             extended to this date with y=0 rows.  Use to align sparse sites/BUs
+             to the global OL_INCIDENTS data end so prediction anchors are current.
 
     Returns
     -------
@@ -92,8 +137,13 @@ def _df_to_monthly_series(raw: pd.DataFrame) -> pd.DataFrame:
     if len(counts) < 2:
         return counts
 
+    # Extend to pad_to if the series ends earlier (zero-pad the gap)
+    end = counts["ds"].max()
+    if pad_to is not None and pd.Timestamp(pad_to) > end:
+        end = pd.Timestamp(pad_to)
+
     # Fill missing months in the range with 0
-    full_range = pd.date_range(counts["ds"].min(), counts["ds"].max(), freq="MS")
+    full_range = pd.date_range(counts["ds"].min(), end, freq="MS")
     counts = (
         counts.set_index("ds")
         .reindex(full_range, fill_value=0)
@@ -140,15 +190,24 @@ def _build_lag_features_from_series(
 # ---------------------------------------------------------------------------
 
 def build_site_monthly_series(site: str, session_factory=None) -> pd.DataFrame:
-    """[ds, y] monthly series for a site.  Missing months filled with y=0."""
-    return _df_to_monthly_series(_load_raw(site=site, session_factory=session_factory))
+    """
+    [ds, y] monthly series for a site.  Missing months filled with y=0.
+    Automatically zero-padded to the global OL_INCIDENTS max date so that
+    sparse sites are anchored to the current data end, not to their own last incident.
+    """
+    raw = _load_raw(site=site, session_factory=session_factory)
+    pad_to = get_global_max_date(session_factory)
+    return _df_to_monthly_series(raw, pad_to=pad_to)
 
 
 def build_bu_monthly_series(business_unit: str, session_factory=None) -> pd.DataFrame:
-    """[ds, y] monthly series for an entire business unit (all sites aggregated)."""
-    return _df_to_monthly_series(
-        _load_raw(business_unit=business_unit, session_factory=session_factory)
-    )
+    """
+    [ds, y] monthly series for an entire business unit (all sites aggregated).
+    Zero-padded to the global OL_INCIDENTS max date.
+    """
+    raw = _load_raw(business_unit=business_unit, session_factory=session_factory)
+    pad_to = get_global_max_date(session_factory)
+    return _df_to_monthly_series(raw, pad_to=pad_to)
 
 
 def build_lag_features(

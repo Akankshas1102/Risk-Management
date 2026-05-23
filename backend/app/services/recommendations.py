@@ -11,6 +11,10 @@ action_text before persisting.
 site_data keys expected by rules:
     site, quarter, total_incidents_qtr, delta_qtr_pct, reporting_lag_p90,
     business_unit
+
+Driver dict keys (from compute_drivers_for_site):
+    driver_name, category, impact_score, trend, pct_change_vs_last_qtr,
+    sparkline_data, quarter, computed_at
 """
 
 from __future__ import annotations
@@ -26,10 +30,11 @@ from typing import Callable, Optional
 @dataclass
 class RecommendationSpec:
     action_text: str
-    priority: str          # high / medium / low
+    priority: str           # high / medium / low
     impact_estimate: str = ""
     suggested_owner: str = ""
     source: str = "rules"
+    driver_link: str = ""   # category / driver name that triggered this rule
 
 
 # type alias for rule functions
@@ -59,6 +64,11 @@ def _top_driver(drivers: list[dict]) -> Optional[dict]:
     return max(drivers, key=lambda d: d.get("impact_score", 0)) if drivers else None
 
 
+def _driver_name(d: Optional[dict]) -> str:
+    """Safe driver name extraction for driver_link."""
+    return (d or {}).get("driver_name", "") or ""
+
+
 # ---------------------------------------------------------------------------
 # Individual rules (each is a self-contained function)
 # ---------------------------------------------------------------------------
@@ -72,19 +82,21 @@ def rule_access_control(drivers: list[dict], site_data: dict) -> Optional[Recomm
             priority="high",
             impact_estimate="Could reduce access-control incidents 20-30% within 2 quarters",
             suggested_owner="Site Security Manager",
+            driver_link=_driver_name(d),
         )
     return None
 
 
 def rule_ir_worker(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
     """IR/Worker driver with high impact → labour engagement programme."""
-    d = _find_driver(drivers, "ir", "worker")
+    d = _find_driver(drivers, "ir", "worker") or _find_driver(drivers, "agitation")
     if d and (d.get("impact_score") or 0) > 70:
         return RecommendationSpec(
             action_text="Initiate community/labour engagement programme",
             priority="medium",
             impact_estimate="Could reduce IR-related incidents 15-25% over 2 quarters",
             suggested_owner="HR & Community Relations",
+            driver_link=_driver_name(d),
         )
     return None
 
@@ -102,6 +114,7 @@ def rule_asset_property(drivers: list[dict], site_data: dict) -> Optional[Recomm
             priority="high",
             impact_estimate="Could reduce asset/property incidents 15-20%",
             suggested_owner="Site Security Manager",
+            driver_link=_driver_name(top),
         )
     return None
 
@@ -115,19 +128,58 @@ def rule_reporting_lag(drivers: list[dict], site_data: dict) -> Optional[Recomme
             priority="medium",
             impact_estimate="Faster reporting enables quicker corrective action",
             suggested_owner="EHS Compliance Lead",
+            driver_link="",   # lag is a process metric, not a specific driver category
         )
     return None
 
 
 def rule_process_deviations(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
     """SOP / LSR / Process-deviation driver trending up → refresher training."""
-    d = _find_driver(drivers, "sop") or _find_driver(drivers, "lsr") or _find_driver(drivers, "deviation")
+    d = (
+        _find_driver(drivers, "sop")
+        or _find_driver(drivers, "lsr")
+        or _find_driver(drivers, "deviation")
+        or _find_driver(drivers, "procedure")
+    )
     if d and d.get("trend") == "up":
         return RecommendationSpec(
             action_text="Schedule SOP/LSR refresher training and update procedure notices",
             priority="medium",
             impact_estimate="Could reduce SOP-violation incidents 10-15%",
             suggested_owner="EHS Training Coordinator",
+            driver_link=_driver_name(d),
+        )
+    return None
+
+
+def rule_high_velocity(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
+    """Any driver with pct_change > 50% in a single quarter — rapid escalation flag."""
+    sharp = [d for d in drivers if (d.get("pct_change_vs_last_qtr") or 0) > 50]
+    if not sharp:
+        return None
+    worst = max(sharp, key=lambda d: d.get("pct_change_vs_last_qtr", 0))
+    return RecommendationSpec(
+        action_text=(
+            f"Investigate rapid rise in '{worst['driver_name']}' incidents "
+            f"({worst.get('pct_change_vs_last_qtr', 0):.0f}% QoQ) — trigger root-cause analysis"
+        ),
+        priority="high",
+        impact_estimate="Rapid escalation; early intervention can prevent repeat incidents",
+        suggested_owner="Site EHS Manager",
+        driver_link=_driver_name(worst),
+    )
+
+
+def rule_material_handling(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
+    """Material / spillage driver with impact > 60 → safe-handling refresher."""
+    d = _find_driver(drivers, "material")
+    if d and (d.get("impact_score") or 0) > 60:
+        return RecommendationSpec(
+            action_text="Audit material handling procedures and schedule safe-handling refresher",
+            priority="high" if (d.get("impact_score") or 0) >= 80 else "medium",
+            impact_estimate="Material incidents are highest-impact; 20-30% reduction possible with controls",
+            suggested_owner="Operations & EHS Manager",
+            driver_link=_driver_name(d),
         )
     return None
 
@@ -144,20 +196,24 @@ def rule_generic_fallback(drivers: list[dict], site_data: dict) -> Optional[Reco
         priority=priority,
         impact_estimate=f"Top driver accounts for {score:.0f}/100 of predicted risk",
         suggested_owner="Site EHS Manager",
+        driver_link=_driver_name(top),
     )
 
 
 # ---------------------------------------------------------------------------
-# Rule registry — add new rules here, order matters for priority resolution
+# Rule registry — add new rules here; order matters for priority resolution.
+# rule_generic_fallback must remain last (it always fires as a safety net).
 # ---------------------------------------------------------------------------
 
 RULES: list[RuleFn] = [
-    rule_access_control,
-    rule_ir_worker,
-    rule_asset_property,
-    rule_reporting_lag,
-    rule_process_deviations,
-    rule_generic_fallback,   # must be last (fallback)
+    rule_high_velocity,          # rapid QoQ spike → immediate flag
+    rule_access_control,         # access control up >20%
+    rule_material_handling,      # material incidents high impact
+    rule_ir_worker,              # labour / community relations
+    rule_asset_property,         # asset theft / property top driver + rising
+    rule_reporting_lag,          # p90 lag > 30 days
+    rule_process_deviations,     # SOP/LSR trending up
+    rule_generic_fallback,       # always last
 ]
 
 
@@ -175,10 +231,10 @@ def generate_recommendations(
 
     Parameters
     ----------
-    drivers : List of driver dicts (from compute_drivers_for_site).
+    drivers   : List of driver dicts (from compute_drivers_for_site).
     site_data : Dict with site context (total_incidents_qtr, delta_qtr_pct,
                 reporting_lag_p90, site, quarter, business_unit).
-    rules : Override the default RULES list (useful for testing).
+    rules     : Override the default RULES list (useful for testing).
 
     Returns
     -------

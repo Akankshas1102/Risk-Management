@@ -121,6 +121,14 @@ def main() -> None:
 
             # Log model metrics (use first row's metrics since they're the same across quarters)
             first = df.iloc[0]
+
+            # Count distinct quarters in risk_scores for this site (history depth)
+            with sf() as session:
+                n_q = session.execute(
+                    text("SELECT COUNT(DISTINCT quarter) FROM risk_scores WHERE site = :s"),
+                    {"s": site},
+                ).scalar() or 0
+
             for model_key, name_prefix in [
                 ("_prophet", "prophet"),
                 ("_xgb", "xgboost"),
@@ -141,6 +149,7 @@ def main() -> None:
                     "holdout_rmse": rmse,
                     "holdout_mape": mape,
                     "is_champion": False,  # updated below
+                    "n_quarters_history": int(n_q),
                     "notes": f"confidence_band={first['confidence_band']}",
                 })
 

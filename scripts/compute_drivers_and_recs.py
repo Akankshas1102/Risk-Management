@@ -143,6 +143,7 @@ def persist_drivers(drivers_df: pd.DataFrame, site: str, sf, dry_run: bool) -> N
                 "impact_score": row["impact_score"],
                 "trend": row["trend"],
                 "pct_change_vs_last_qtr": row["pct_change_vs_last_qtr"],
+                "sparkline_data": row.get("sparkline_data"),
                 "computed_at": row["computed_at"],
             }))
         session.commit()
@@ -171,6 +172,7 @@ def persist_recommendations(recs, site: str, quarter: str, sf, dry_run: bool) ->
                 suggested_owner=rec.suggested_owner or "",
                 status="open",
                 source=rec.source,
+                driver_link=rec.driver_link or "",
                 created_at=now,
             ))
         session.commit()

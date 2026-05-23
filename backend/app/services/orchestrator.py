@@ -1,22 +1,54 @@
 """
 Pipeline orchestrator.
 
-run_full_pipeline(trigger) runs all three ML steps in sequence.
-Each step is wrapped in a timed try/except so one failure never blocks the others.
-Full tracebacks are captured and stored in pipeline_runs.steps_run JSON.
+run_full_pipeline(trigger)
+    Executes all four ML steps in order:
+        1. risk_scores    — composite score per site per quarter
+        2. forecasters    — n-quarter-ahead predictions
+        3. backtest       — walk-forward 6-month holdout evaluation
+        4. drivers        — SHAP attribution + rules-based recommendations
+
+    Each step is wrapped in a timed try/except so one failure never blocks
+    the others.  Full tracebacks are captured and stored in
+    pipeline_runs.steps_run JSON.
+
+Service functions for Vinay's admin API
+-----------------------------------------
+trigger_manual_retrain(background_tasks=None) -> dict
+    Queue a manual run (status="queued") and start it asynchronously.
+    Returns {run_id, status}.
+
+get_recent_runs(limit=10) -> list[dict]
+    Return the last `limit` pipeline_runs rows, newest first.
+
+get_freshness() -> dict
+    Single snapshot of data currency across the whole pipeline.
+    Keys: last_ingest_at, last_pipeline_run_at, latest_incident_date,
+          latest_predicted_quarter, n_sites_with_predictions,
+          sites_missing_predictions.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 import traceback
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Optional
+
+from sqlalchemy import select, text
 
 from app.core.ssms import SSMSSession
 from app.models.pipeline import PipelineRun
-from app.services.pipeline_steps import step_drivers, step_forecasters, step_risk_scores
+from app.models.predictions import PredictionsCache
+from app.models.ol_incidents import OLIncident
+from app.services.pipeline_steps import (
+    step_backtest,
+    step_drivers,
+    step_forecasters,
+    step_risk_scores,
+)
 
 log = logging.getLogger(__name__)
 
@@ -49,31 +81,36 @@ def _run_step(name: str, fn: Callable, *args: Any, **kwargs: Any) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Core pipeline
 # ---------------------------------------------------------------------------
 
 def run_full_pipeline(
     trigger: str,
-    run_id: int | None = None,
+    run_id: Optional[int] = None,
     session_factory=None,
 ) -> dict:
     """
-    Execute all three ML pipeline steps in order:
+    Execute all four ML pipeline steps in order:
       1. risk_scores   — composite score per site per quarter
-      2. forecasters   — n-quarter ahead predictions
-      3. drivers       — SHAP attribution + recommendations
+      2. forecasters   — n-quarter-ahead predictions
+      3. backtest      — walk-forward 6-month holdout evaluation
+      4. drivers       — SHAP attribution + recommendations
 
-    A failure in any step is logged and stored; subsequent steps still run.
+    A failure in any step is logged and stored; subsequent steps still run
+    (risk_scores failure is the only one that might make forecasters less
+    meaningful, but we run it anyway to surface the error clearly).
 
     Parameters
     ----------
     trigger : 'manual' | 'scheduled' | 'post_ingest'
-    run_id  : If provided, updates an existing pipeline_runs row; otherwise creates one.
+    run_id  : If provided, updates an existing pipeline_runs row instead of
+              creating one.  Pass the value returned by create_queued_run().
     session_factory : Override SSMSSession (for tests).
 
     Returns
     -------
-    dict with run_id, status, steps summary, started_at, finished_at.
+    dict with run_id, status, steps summary, started_at, finished_at,
+    total_duration_s.
     """
     sf = session_factory or SSMSSession
     started_at = _now()
@@ -98,9 +135,14 @@ def run_full_pipeline(
 
     steps["risk_scores"] = _run_step("risk_scores", step_risk_scores, sf)
 
-    # Forecasters and drivers can run independently; a forecaster failure
-    # does not block driver computation since drivers read raw OL_INCIDENTS.
+    # forecasters reads OL_INCIDENTS directly; not blocked by risk_scores result
     steps["forecasters"] = _run_step("forecasters", step_forecasters, sf)
+
+    # backtest runs after forecasters so champion model_runs rows are current
+    steps["backtest"] = _run_step("backtest", step_backtest, sf)
+
+    # drivers reads OL_INCIDENTS directly; runs last so recommendations can
+    # reference the freshest sparkline / QoQ data
     steps["drivers"] = _run_step("drivers", step_drivers, sf)
 
     # ── Determine overall status ───────────────────────────────────────────
@@ -113,7 +155,7 @@ def run_full_pipeline(
         overall = "partial"
 
     error_fragments = [
-        f"{name}: {info.get('traceback', '')[:200]}"
+        f"{name}: {info.get('traceback', '')[:300]}"
         for name, info in steps.items()
         if info["status"] == "error"
     ]
@@ -144,7 +186,10 @@ def run_full_pipeline(
 
 
 def create_queued_run(trigger: str, session_factory=None) -> int:
-    """Insert a pipeline_runs row with status='queued' and return its id."""
+    """
+    Insert a pipeline_runs row with status='queued' and return its id.
+    Used when you want to reserve a run_id before kicking off the background work.
+    """
     sf = session_factory or SSMSSession
     run = PipelineRun(trigger=trigger, status="queued", started_at=_now())
     with sf() as session:
@@ -153,3 +198,216 @@ def create_queued_run(trigger: str, session_factory=None) -> int:
         run_id = run.id
         session.commit()
     return run_id
+
+
+# ---------------------------------------------------------------------------
+# Service functions — call these from Vinay's API
+# ---------------------------------------------------------------------------
+
+def trigger_manual_retrain(background_tasks=None) -> dict:
+    """
+    Queue a manual full-pipeline run and start it asynchronously.
+
+    Parameters
+    ----------
+    background_tasks : fastapi.BackgroundTasks (optional).
+        If provided, the run is enqueued via FastAPI's task runner.
+        If omitted (e.g. called from a script), a daemon thread is used.
+
+    Returns
+    -------
+    dict: ``{"run_id": <int>, "status": "queued"}``
+
+    Example (Vinay's endpoint)
+    --------------------------
+    ::
+
+        @router.post("/admin/retrain")
+        async def retrain(bg: BackgroundTasks):
+            return trigger_manual_retrain(background_tasks=bg)
+    """
+    run_id = create_queued_run("manual")
+
+    if background_tasks is not None:
+        background_tasks.add_task(run_full_pipeline, trigger="manual", run_id=run_id)
+    else:
+        t = threading.Thread(
+            target=run_full_pipeline,
+            kwargs={"trigger": "manual", "run_id": run_id},
+            daemon=True,
+            name=f"pipeline-manual-{run_id}",
+        )
+        t.start()
+
+    log.info("Manual retrain queued — run_id=%s", run_id)
+    return {"run_id": run_id, "status": "queued"}
+
+
+def get_recent_runs(limit: int = 10, session_factory=None) -> list[dict]:
+    """
+    Return the most recent pipeline_runs rows, newest first.
+
+    Parameters
+    ----------
+    limit : Number of rows to return (default 10, max sensibly ~50).
+
+    Returns
+    -------
+    list of dicts with keys:
+        id, trigger, status, started_at, finished_at,
+        total_duration_s, steps, error_summary.
+
+    Example (Vinay's endpoint)
+    --------------------------
+    ::
+
+        @router.get("/admin/runs")
+        def list_runs():
+            return get_recent_runs(limit=20)
+    """
+    sf = session_factory or SSMSSession
+    with sf() as session:
+        rows = session.execute(
+            select(PipelineRun)
+            .order_by(PipelineRun.started_at.desc())
+            .limit(limit)
+        ).scalars().all()
+
+    result = []
+    for run in rows:
+        steps = run.steps  # decoded via @property
+        total_s = (
+            round(sum(s.get("duration_s", 0) for s in steps.values()), 1)
+            if steps else None
+        )
+        result.append({
+            "id": run.id,
+            "trigger": run.trigger,
+            "status": run.status,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+            "total_duration_s": total_s,
+            "steps": steps,
+            "error_summary": run.error_summary,
+        })
+    return result
+
+
+def get_freshness(session_factory=None) -> dict:
+    """
+    Single snapshot of data currency across the whole pipeline.
+
+    Queries both databases:
+    - SQL Server (vedanta): pipeline_runs, OL_INCIDENTS, predictions_cache
+    - Postgres: ingestion_runs (for last CSV upload timestamp)
+
+    Returns
+    -------
+    dict with keys:
+        last_ingest_at          (str ISO-8601 | None)  — last successful CSV upload
+        last_pipeline_run_at    (str ISO-8601 | None)  — last finished pipeline run
+        pipeline_run_status     (str | None)           — its status
+        latest_incident_date    (str | None)           — MAX(OCCUREDDATE) in OL_INCIDENTS
+        latest_predicted_quarter (str | None)          — most recently trained prediction target
+        n_sites_with_predictions (int)                 — distinct sites in predictions_cache
+        sites_missing_predictions (list[str])          — sites in OL_INCIDENTS with no predictions
+
+    Example (Vinay's endpoint)
+    --------------------------
+    ::
+
+        @router.get("/admin/freshness")
+        def freshness():
+            return get_freshness()
+    """
+    sf = session_factory or SSMSSession
+    result: dict[str, Any] = {}
+
+    # ── SQL Server queries ────────────────────────────────────────────────
+    with sf() as session:
+        # Last finished pipeline run
+        run_row = session.execute(
+            select(PipelineRun.finished_at, PipelineRun.status)
+            .where(PipelineRun.finished_at.isnot(None))
+            .order_by(PipelineRun.finished_at.desc())
+            .limit(1)
+        ).first()
+
+        # Latest incident occurrence date (varchar ISO — MAX is lexicographically safe)
+        data_date_row = session.execute(
+            text("""
+                SELECT MAX(OCCUREDDATE) AS latest_date
+                FROM OL_INCIDENTS
+                WHERE TRY_CAST(YEAR AS INT) > 2000
+                  AND LEN(OCCUREDDATE) = 10
+            """)
+        ).first()
+
+        # Latest predicted quarter and count of sites with predictions
+        pred_stats = session.execute(
+            text("""
+                SELECT
+                    MAX(trained_at) AS last_trained,
+                    COUNT(DISTINCT site) AS n_sites
+                FROM predictions_cache
+            """)
+        ).first()
+
+        latest_pred_q_row = session.execute(
+            select(PredictionsCache.target_quarter, PredictionsCache.trained_at)
+            .order_by(PredictionsCache.trained_at.desc())
+            .limit(1)
+        ).first()
+
+        # All sites in OL_INCIDENTS (year ≥ 2020, SINAME not null)
+        all_sites_rows = session.execute(
+            select(OLIncident.SINAME)
+            .where(OLIncident.YEAR >= "2020", OLIncident.SINAME.isnot(None))
+            .distinct()
+        ).all()
+        all_sites = {r[0] for r in all_sites_rows}
+
+        # Sites that do have predictions
+        pred_site_rows = session.execute(
+            select(PredictionsCache.site).distinct()
+        ).all()
+        sites_with_preds = {r[0] for r in pred_site_rows}
+
+    sites_missing = sorted(all_sites - sites_with_preds)
+
+    result["last_pipeline_run_at"] = (
+        run_row.finished_at.isoformat() if run_row and run_row.finished_at else None
+    )
+    result["pipeline_run_status"] = run_row.status if run_row else None
+    result["latest_incident_date"] = (
+        data_date_row.latest_date if data_date_row else None
+    )
+    result["latest_predicted_quarter"] = (
+        latest_pred_q_row.target_quarter if latest_pred_q_row else None
+    )
+    result["n_sites_with_predictions"] = int(pred_stats.n_sites) if pred_stats else 0
+    result["sites_missing_predictions"] = sites_missing
+
+    # ── Postgres query — last successful CSV ingest ───────────────────────
+    # ingestion_runs lives in Postgres (app.core.database.SessionLocal).
+    # Import lazily so this module can be used independently of the Postgres stack.
+    result["last_ingest_at"] = None
+    try:
+        from app.core.database import SessionLocal  # noqa: PLC0415
+        from app.models.incident import IngestionRun  # noqa: PLC0415
+
+        with SessionLocal() as pg_session:
+            ingest_row = pg_session.execute(
+                select(IngestionRun.finished_at)
+                .where(IngestionRun.status == "success")
+                .order_by(IngestionRun.finished_at.desc())
+                .limit(1)
+            ).first()
+
+        if ingest_row and ingest_row.finished_at:
+            result["last_ingest_at"] = ingest_row.finished_at.isoformat()
+    except Exception:
+        # Postgres may be unavailable in some deployment contexts (ML-only run)
+        log.debug("Could not query Postgres ingestion_runs for freshness", exc_info=True)
+
+    return result

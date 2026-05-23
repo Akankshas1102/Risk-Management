@@ -30,4 +30,5 @@ class ModelRun(SSMSBase):
     holdout_rmse = Column(Float)
     holdout_mape = Column(Float)
     is_champion = Column(Boolean, default=False)
+    n_quarters_history = Column(Integer)                  # distinct quarters in risk_scores for this site
     notes = Column(String(2000))
