@@ -388,26 +388,22 @@ def get_freshness(session_factory=None) -> dict:
     result["n_sites_with_predictions"] = int(pred_stats.n_sites) if pred_stats else 0
     result["sites_missing_predictions"] = sites_missing
 
-    # ── Postgres query — last successful CSV ingest ───────────────────────
-    # ingestion_runs lives in Postgres (app.core.database.SessionLocal).
-    # Import lazily so this module can be used independently of the Postgres stack.
+    # ── SQL Server query — last successful CSV ingest ────────────────────
+    from app.models.ingestion import IngestionRunSSMS  # noqa: PLC0415
+
     result["last_ingest_at"] = None
     try:
-        from app.core.database import SessionLocal  # noqa: PLC0415
-        from app.models.incident import IngestionRun  # noqa: PLC0415
-
-        with SessionLocal() as pg_session:
-            ingest_row = pg_session.execute(
-                select(IngestionRun.finished_at)
-                .where(IngestionRun.status == "success")
-                .order_by(IngestionRun.finished_at.desc())
+        with SSMSSession() as ssms:
+            ingest_row = ssms.execute(
+                select(IngestionRunSSMS.finished_at)
+                .where(IngestionRunSSMS.status == "success")
+                .order_by(IngestionRunSSMS.finished_at.desc())
                 .limit(1)
             ).first()
 
         if ingest_row and ingest_row.finished_at:
             result["last_ingest_at"] = ingest_row.finished_at.isoformat()
     except Exception:
-        # Postgres may be unavailable in some deployment contexts (ML-only run)
-        log.debug("Could not query Postgres ingestion_runs for freshness", exc_info=True)
+        log.debug("Could not query SQL Server ingestion_runs for freshness", exc_info=True)
 
     return result

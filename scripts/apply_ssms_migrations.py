@@ -17,6 +17,7 @@ import app.models.predictions  # noqa: F401 — registers PredictionsCache, Mode
 import app.models.drivers      # noqa: F401 — registers RiskDriver, Recommendation
 import app.models.pipeline     # noqa: F401 — registers PipelineRun, RiskScoreSSMS
 import app.models.backtest     # noqa: F401 — registers BacktestResult
+import app.models.ingestion    # noqa: F401 — registers IngestionRunSSMS
 
 print("Applying SSMS migrations...")
 SSMSBase.metadata.create_all(ssms_engine, checkfirst=True)

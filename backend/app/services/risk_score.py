@@ -1,32 +1,31 @@
 """
-Risk score computation engine.
+Risk score computation utilities.
 
-Public API
-----------
-compute_frequency_index(df, quarter)  -> dict[site, float]
-compute_severity_index(df, quarter)   -> dict[site, float]
-compute_velocity_index(df, quarter)   -> dict[site, float]
-compute_diversity_index(df, quarter)  -> dict[site, float]
-compute_risk_scores(quarters, ...)    -> pd.DataFrame
-persist_risk_scores(df, ...)          -> None
+These pure-math functions are imported by pipeline_steps.step_risk_scores()
+to compute composite site risk scores from an OL_INCIDENTS DataFrame.
 
-All index functions return values in [0, 1] via min-max normalization
-within the quarter's peer group.  The composite score is therefore
-bounded to [0, 100] by construction.
+Phase 2C (2026-05-25): Postgres-backed compute_risk_scores() and
+persist_risk_scores() were removed when the Postgres stack was retired.
+The active pipeline reads from SQL Server OL_INCIDENTS directly
+(see backend/app/services/pipeline_steps.py: step_risk_scores).
+
+Public API (used by pipeline_steps)
+------------------------------------
+_DEFAULT_WEIGHTS        dict[str, float]
+_FISCAL_ORDER           list[str]
+_current_quarter_str()  -> str
+_quarter_sort_key(s)    -> int
+_score_to_level(score)  -> str
+compute_frequency_index(df, quarter) -> dict[site, float]
+compute_severity_index(df, quarter)  -> dict[site, float]
+compute_velocity_index(df, quarter)  -> dict[site, float]
+compute_diversity_index(df, quarter) -> dict[site, float]
 """
 
 import math
-from datetime import date, datetime, timezone
-from typing import Any
+from datetime import date
 
 import pandas as pd
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import sessionmaker
-
-from app.core.database import SessionLocal
-from app.models.incident import IncidentClean
-from app.models.risk_score import RiskScore, RiskScoreWeights
 
 
 # ---------------------------------------------------------------------------
@@ -107,11 +106,6 @@ def compute_frequency_index(df: pd.DataFrame, quarter: str) -> dict[str, float]:
     Incident count per site, min-max normalized within the quarter.
     Sites that have no incidents in this quarter receive a count of 0.
     Single-site quarters return 0.5.
-
-    Parameters
-    ----------
-    df : full incidents_clean DataFrame (all quarters)
-    quarter : 'YYYY-Qn' string
     """
     year_str, q = quarter.split("-")
     year = int(year_str)
@@ -224,185 +218,3 @@ def _score_to_level(score: float) -> str:
         if score <= threshold:
             return label
     return "Critical"
-
-
-def _load_weights(session) -> dict[Any, dict[str, float]]:
-    """
-    Load active weight rows from risk_score_weights.
-    Returns {business_unit: {w_frequency, ...}}.  None key = global default.
-    """
-    today = date.today()
-    rows = session.execute(
-        select(RiskScoreWeights)
-        .where(
-            RiskScoreWeights.effective_from <= today,
-            (RiskScoreWeights.effective_to.is_(None))
-            | (RiskScoreWeights.effective_to >= today),
-        )
-        .order_by(RiskScoreWeights.effective_from.desc())
-    ).scalars().all()
-
-    weights: dict[Any, dict[str, float]] = {}
-    for row in rows:
-        bu = row.business_unit  # may be None (global default)
-        if bu not in weights:   # keep most-recently-effective row per BU
-            weights[bu] = {
-                "w_frequency": float(row.w_frequency),
-                "w_severity": float(row.w_severity),
-                "w_velocity": float(row.w_velocity),
-                "w_diversity": float(row.w_diversity),
-            }
-
-    if None not in weights:
-        weights[None] = _DEFAULT_WEIGHTS.copy()
-
-    return weights
-
-
-# ---------------------------------------------------------------------------
-# Orchestrator
-# ---------------------------------------------------------------------------
-
-def compute_risk_scores(
-    quarters: list[str] | None = None,
-    include_partial: bool = False,
-    session_factory: sessionmaker | None = None,
-) -> pd.DataFrame:
-    """
-    Compute composite risk scores for all (or specified) quarters.
-
-    Parameters
-    ----------
-    quarters : list of 'YYYY-Qn' strings to compute; None = all complete quarters.
-    include_partial : if True, also compute the current incomplete quarter.
-    session_factory : override SessionLocal (useful in tests).
-
-    Returns
-    -------
-    DataFrame with columns: site, business_unit, quarter, quarter_sort_key,
-    risk_score, risk_level, frequency_index, severity_index, velocity_index,
-    diversity_index.
-    """
-    sf = session_factory or SessionLocal
-
-    # Load incidents_clean from DB
-    with sf() as session:
-        rows = session.execute(
-            select(
-                IncidentClean.site_name,
-                IncidentClean.buname,
-                IncidentClean.quarter,
-                IncidentClean.year,
-                IncidentClean.severity,
-                IncidentClean.incident_category,
-            )
-        ).all()
-
-    if not rows:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(
-        rows,
-        columns=["site_name", "buname", "quarter", "year", "severity", "incident_category"],
-    )
-    df["quarter_str"] = df["year"].astype(str) + "-" + df["quarter"]
-
-    available = sorted(df["quarter_str"].unique(), key=_quarter_sort_key)
-
-    if not include_partial:
-        current_q = _current_quarter_str()
-        available = [q for q in available if q != current_q]
-
-    if quarters is not None:
-        available = [q for q in available if q in quarters]
-
-    if not available:
-        return pd.DataFrame()
-
-    # Load weights
-    with sf() as session:
-        weights_map = _load_weights(session)
-
-    # Site → dominant business unit
-    site_bu: dict[str, str | None] = (
-        df.groupby("site_name")["buname"]
-        .agg(lambda x: x.mode().iloc[0] if len(x.mode()) else None)
-        .to_dict()
-    )
-
-    results: list[dict] = []
-    for qstr in available:
-        f_idx = compute_frequency_index(df, qstr)
-        sev_idx = compute_severity_index(df, qstr)
-        vel_idx = compute_velocity_index(df, qstr)
-        div_idx = compute_diversity_index(df, qstr)
-
-        for site in f_idx:
-            bu = site_bu.get(site)
-            w = weights_map.get(bu) or weights_map.get(None) or _DEFAULT_WEIGHTS
-
-            fi = f_idx[site]
-            si = sev_idx.get(site, 0.5)
-            vi = vel_idx.get(site, 0.5)
-            di = div_idx.get(site, 0.5)
-
-            score = 100.0 * (
-                w["w_frequency"] * fi
-                + w["w_severity"] * si
-                + w["w_velocity"] * vi
-                + w["w_diversity"] * di
-            )
-            score = round(max(0.0, min(100.0, score)), 4)
-
-            results.append(
-                {
-                    "site": site,
-                    "business_unit": bu,
-                    "quarter": qstr,
-                    "quarter_sort_key": _quarter_sort_key(qstr),
-                    "risk_score": score,
-                    "risk_level": _score_to_level(score),
-                    "frequency_index": round(fi, 6),
-                    "severity_index": round(si, 6),
-                    "velocity_index": round(vi, 6),
-                    "diversity_index": round(di, 6),
-                }
-            )
-
-    return pd.DataFrame(results)
-
-
-# ---------------------------------------------------------------------------
-# Persistence
-# ---------------------------------------------------------------------------
-
-def persist_risk_scores(
-    df: pd.DataFrame,
-    session_factory: sessionmaker | None = None,
-) -> None:
-    """Upsert risk scores to the risk_scores table (conflict on site + quarter)."""
-    if df.empty:
-        return
-
-    sf = session_factory or SessionLocal
-    computed_at = datetime.now(timezone.utc)
-
-    records = [
-        {**row.to_dict(), "computed_at": computed_at}
-        for _, row in df.iterrows()
-    ]
-
-    stmt = pg_insert(RiskScore.__table__).values(records)
-    update_cols = {
-        c: stmt.excluded[c]
-        for c in records[0]
-        if c not in ("site", "quarter")
-    }
-    stmt = stmt.on_conflict_do_update(
-        constraint="uq_risk_scores_site_quarter",
-        set_=update_cols,
-    )
-
-    with sf() as session:
-        session.execute(stmt)
-        session.commit()
