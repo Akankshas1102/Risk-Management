@@ -1,27 +1,11 @@
 """
-Database connection — PostgreSQL (vedanta_risk).
-
-All names (SSMSSession, ssms_engine, get_ssms_db, SSMSBase) are kept as-is so
-existing API files (api/analytics.py, api/admin.py, etc.) continue to work
-without modification.  The underlying database is now PostgreSQL, not SQL Server.
+Backward-compat shim — api/ files import get_ssms_db / SSMSSession from here.
+All real database logic lives in core/database.py.
+Do not add new code here.
 """
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from app.core.database import engine as ssms_engine          # noqa: F401
+from app.core.database import SessionLocal as SSMSSession    # noqa: F401
+from app.core.database import get_db as get_ssms_db          # noqa: F401
 
-from app.core.config import settings
-
-ssms_engine = create_engine(
-    settings.DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=5,
-)
-SSMSSession = sessionmaker(bind=ssms_engine, autocommit=False, autoflush=False)
-
-
-def get_ssms_db():
-    db = SSMSSession()
-    try:
-        yield db
-    finally:
-        db.close()
+__all__ = ["ssms_engine", "SSMSSession", "get_ssms_db"]

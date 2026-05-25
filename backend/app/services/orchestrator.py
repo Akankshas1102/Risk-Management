@@ -39,7 +39,7 @@ from typing import Any, Callable, Optional
 
 from sqlalchemy import select, text
 
-from app.core.ssms import SSMSSession
+from app.core.database import SessionLocal
 from app.models.pipeline import PipelineRun
 from app.models.predictions import PredictionsCache
 from app.models.ol_incidents import OLIncident
@@ -105,14 +105,14 @@ def run_full_pipeline(
     trigger : 'manual' | 'scheduled' | 'post_ingest'
     run_id  : If provided, updates an existing pipeline_runs row instead of
               creating one.  Pass the value returned by create_queued_run().
-    session_factory : Override SSMSSession (for tests).
+    session_factory : Override SessionLocal (for tests).
 
     Returns
     -------
     dict with run_id, status, steps summary, started_at, finished_at,
     total_duration_s.
     """
-    sf = session_factory or SSMSSession
+    sf = session_factory or SessionLocal
     started_at = _now()
 
     # ── Create / update the run record ────────────────────────────────────
@@ -190,7 +190,7 @@ def create_queued_run(trigger: str, session_factory=None) -> int:
     Insert a pipeline_runs row with status='queued' and return its id.
     Used when you want to reserve a run_id before kicking off the background work.
     """
-    sf = session_factory or SSMSSession
+    sf = session_factory or SessionLocal
     run = PipelineRun(trigger=trigger, status="queued", started_at=_now())
     with sf() as session:
         session.add(run)
@@ -265,7 +265,7 @@ def get_recent_runs(limit: int = 10, session_factory=None) -> list[dict]:
         def list_runs():
             return get_recent_runs(limit=20)
     """
-    sf = session_factory or SSMSSession
+    sf = session_factory or SessionLocal
     with sf() as session:
         rows = session.execute(
             select(PipelineRun)
@@ -320,7 +320,7 @@ def get_freshness(session_factory=None) -> dict:
         def freshness():
             return get_freshness()
     """
-    sf = session_factory or SSMSSession
+    sf = session_factory or SessionLocal
     result: dict[str, Any] = {}
 
     # ── SQL Server queries ────────────────────────────────────────────────
@@ -389,15 +389,15 @@ def get_freshness(session_factory=None) -> dict:
     result["sites_missing_predictions"] = sites_missing
 
     # ── SQL Server query — last successful CSV ingest ────────────────────
-    from app.models.ingestion import IngestionRunSSMS  # noqa: PLC0415
+    from app.models.ingestion import IngestionRun  # noqa: PLC0415
 
     result["last_ingest_at"] = None
     try:
-        with SSMSSession() as ssms:
+        with SessionLocal() as ssms:
             ingest_row = ssms.execute(
-                select(IngestionRunSSMS.finished_at)
-                .where(IngestionRunSSMS.status == "success")
-                .order_by(IngestionRunSSMS.finished_at.desc())
+                select(IngestionRun.finished_at)
+                .where(IngestionRun.status == "success")
+                .order_by(IngestionRun.finished_at.desc())
                 .limit(1)
             ).first()
 

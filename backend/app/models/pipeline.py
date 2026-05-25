@@ -1,13 +1,13 @@
-"""SQL Server ORM models for orchestration state and risk scores."""
+"""ORM models for orchestration state and risk scores."""
 
 import json
 
 from sqlalchemy import BigInteger, Column, DateTime, Float, Integer, String, Text, UniqueConstraint
 
-from app.models.ol_incidents import SSMSBase
+from app.models.ol_incidents import Base
 
 
-class PipelineRun(SSMSBase):
+class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -27,8 +27,8 @@ class PipelineRun(SSMSBase):
         self.steps_run = json.dumps(value, default=str)
 
 
-class RiskScoreSSMS(SSMSBase):
-    """SQL Server version of the risk_scores table (populated by the orchestrator)."""
+class RiskScore(Base):
+    """Risk scores per site per quarter (populated by the ML pipeline)."""
 
     __tablename__ = "risk_scores"
     __table_args__ = (

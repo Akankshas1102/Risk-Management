@@ -1,9 +1,9 @@
 from sqlalchemy import BigInteger, Column, DateTime, Float, String, Text
 
-from app.models.ol_incidents import SSMSBase
+from app.models.ol_incidents import Base
 
 
-class RiskDriver(SSMSBase):
+class RiskDriver(Base):
     __tablename__ = "risk_drivers"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -14,11 +14,11 @@ class RiskDriver(SSMSBase):
     impact_score = Column(Float)                    # 0–100 normalised
     trend = Column(String(10))                      # up / down / flat
     pct_change_vs_last_qtr = Column(Float)
-    sparkline_data = Column(Text)                   # JSON array: last 6 monthly counts, e.g. "[2,5,3,0,7,4]"
+    sparkline_data = Column(Text)                   # JSON array: last 6 monthly counts
     computed_at = Column(DateTime)
 
 
-class Recommendation(SSMSBase):
+class Recommendation(Base):
     __tablename__ = "recommendations"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)

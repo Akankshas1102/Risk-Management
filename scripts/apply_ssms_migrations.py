@@ -2,7 +2,7 @@
 Create all ML output tables in the PostgreSQL vedanta_risk database.
 
 This script uses SQLAlchemy's create_all() to create every table registered
-with SSMSBase.  It is idempotent — already-existing tables are not touched.
+with Base.  It is idempotent — already-existing tables are not touched.
 
 Tables created
 --------------
@@ -29,18 +29,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
-from app.core.ssms import ssms_engine
-from app.models.ol_incidents import SSMSBase
+from app.core.database import engine
+from app.models.ol_incidents import Base
 import app.models.predictions  # noqa: F401 — registers PredictionsCache, ModelRun
 import app.models.drivers      # noqa: F401 — registers RiskDriver, Recommendation
-import app.models.pipeline     # noqa: F401 — registers PipelineRun, RiskScoreSSMS
+import app.models.pipeline     # noqa: F401 — registers PipelineRun, RiskScore
 import app.models.backtest     # noqa: F401 — registers BacktestResult
-import app.models.ingestion    # noqa: F401 — registers IngestionRunSSMS
+import app.models.ingestion    # noqa: F401 — registers IngestionRun
 
 print("Creating ML output tables in PostgreSQL vedanta_risk...")
-# ol_incidents is excluded here — it is managed by load_csv_to_db.py
-# All other SSMSBase tables are created below.
-SSMSBase.metadata.create_all(ssms_engine, checkfirst=True)
+Base.metadata.create_all(engine, checkfirst=True)
 print("Done. Tables created (if not already present):")
-for table in sorted(SSMSBase.metadata.tables):
+for table in sorted(Base.metadata.tables):
     print(f"  {table}")

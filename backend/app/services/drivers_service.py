@@ -4,7 +4,7 @@ Service layer for risk-driver and recommendation regeneration.
 Public API (for Vinay's endpoints):
     regenerate_for_site(site, db=None) -> dict
         Re-computes SHAP drivers + rules-based recommendations for one site
-        and persists the results.  Opens its own SSMSSession internally;
+        and persists the results.  Opens its own DB session internally;
         the `db` argument is accepted for FastAPI Depends compatibility but
         is not used.
 
@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import select, text
 
-from app.core.ssms import SSMSSession
+from app.core.database import SessionLocal
 from app.ml.drivers import compute_drivers_for_site
 from app.models.drivers import Recommendation, RiskDriver
 from app.models.ol_incidents import OLIncident
@@ -172,7 +172,7 @@ def regenerate_for_site(site: str, db=None) -> dict:
     ----------
     site : Site name matching SINAME in OL_INCIDENTS.
     db   : Accepted for FastAPI ``Depends`` compatibility; not used internally.
-           The function manages its own SSMSSession transactions.
+           The function manages its own DB transactions internally.
 
     Returns
     -------
@@ -184,7 +184,7 @@ def regenerate_for_site(site: str, db=None) -> dict:
     RuntimeError
         If the site has no incident data (nothing to compute).
     """
-    sf = SSMSSession
+    sf = SessionLocal
     drivers_df = compute_drivers_for_site(site, session_factory=sf)
     if drivers_df.empty:
         raise RuntimeError(f"No incident data found for site '{site}'")
@@ -217,7 +217,7 @@ def regenerate_all(dry_run: bool = False) -> dict:
     dict
         ``{sites_processed, sites_skipped, total_drivers, total_recs, errors}``
     """
-    sf = SSMSSession
+    sf = SessionLocal
     with sf() as session:
         rows = session.execute(
             select(OLIncident.SINAME, OLIncident.BUNAME)

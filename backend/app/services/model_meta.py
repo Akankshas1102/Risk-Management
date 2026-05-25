@@ -78,7 +78,7 @@ def get_model_meta(site: str, db: Session) -> ModelMetaDict:
     Parameters
     ----------
     site : Site name exactly as stored in model_runs / predictions_cache.
-    db   : An active SQLAlchemy Session (SSMSSession).
+    db   : An active SQLAlchemy Session.
 
     Returns
     -------

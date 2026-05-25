@@ -1,9 +1,9 @@
 from sqlalchemy import BigInteger, Column, DateTime, Float, String
 
-from app.models.ol_incidents import SSMSBase
+from app.models.ol_incidents import Base
 
 
-class BacktestResult(SSMSBase):
+class BacktestResult(Base):
     __tablename__ = "backtest_results"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)

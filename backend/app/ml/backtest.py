@@ -25,7 +25,7 @@ import pandas as pd
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.core.ssms import SSMSSession
+from app.core.database import SessionLocal
 from app.ml.features import (
     _build_lag_features_from_series,
     build_bu_monthly_series,
@@ -41,7 +41,7 @@ from app.ml.forecaster import (
 )
 from app.models.backtest import BacktestResult
 from app.models.predictions import ModelRun
-import app.models.backtest  # noqa — registers table with SSMSBase
+import app.models.backtest  # noqa — registers BacktestResult with Base metadata
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ def compute_abs_pct_error(actual: Optional[float], predicted: Optional[float]) -
 
 def _get_champion_model(site: str) -> str | None:
     """Return the champion model name for a site from model_runs (latest champion row)."""
-    with SSMSSession() as s:
+    with SessionLocal() as s:
         row = s.execute(
             select(ModelRun.model_name)
             .where(ModelRun.site == site, ModelRun.is_champion == True)  # noqa: E712
@@ -75,7 +75,7 @@ def _get_champion_model(site: str) -> str | None:
     if row:
         return row[0]
     # Fall back to predictions_cache model_name
-    with SSMSSession() as s:
+    with SessionLocal() as s:
         row = s.execute(
             text("SELECT model_name FROM predictions_cache WHERE site = :s ORDER BY trained_at DESC LIMIT 1"),
             {"s": site},
@@ -216,7 +216,7 @@ def upsert_backtest_rows(rows: list[dict]) -> None:
     if not rows:
         return
     sites = list({r["site"] for r in rows})
-    with SSMSSession() as s:
+    with SessionLocal() as s:
         for site in sites:
             s.execute(text("DELETE FROM backtest_results WHERE site = :s"), {"s": site})
         for row in rows:
@@ -245,7 +245,7 @@ def run_all_backtests(
     from app.models.ol_incidents import OLIncident
 
     if site_pairs is None:
-        with SSMSSession() as s:
+        with SessionLocal() as s:
             rows = s.execute(
                 select(OLIncident.SINAME, OLIncident.BUNAME)
                 .where(OLIncident.YEAR >= "2020", OLIncident.SINAME.isnot(None))

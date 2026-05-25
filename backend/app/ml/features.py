@@ -19,7 +19,7 @@ from typing import Optional
 import pandas as pd
 from sqlalchemy import select
 
-from app.core.ssms import SSMSSession
+from app.core.database import SessionLocal
 from app.models.ol_incidents import OLIncident
 
 _MIN_YEAR = "2020"
@@ -39,7 +39,7 @@ def get_global_max_date(session_factory=None) -> pd.Timestamp:
     if _global_max_date_cache is not None:
         return _global_max_date_cache
 
-    sf = session_factory or SSMSSession
+    sf = session_factory or SessionLocal
     from sqlalchemy import cast, Integer as SAInteger, desc
     with sf() as session:
         row = session.execute(
@@ -75,7 +75,7 @@ def _load_raw(
     business_unit: Optional[str] = None,
     session_factory=None,
 ) -> pd.DataFrame:
-    sf = session_factory or SSMSSession
+    sf = session_factory or SessionLocal
     conds = [
         OLIncident.YEAR >= _MIN_YEAR,
         OLIncident.YEAR.isnot(None),
@@ -225,7 +225,7 @@ def build_lag_features(
 
 def get_site_bu(site: str, session_factory=None) -> Optional[str]:
     """Return the dominant business unit for a site."""
-    sf = session_factory or SSMSSession
+    sf = session_factory or SessionLocal
     with sf() as session:
         row = session.execute(
             select(OLIncident.BUNAME)

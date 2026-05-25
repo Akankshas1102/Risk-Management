@@ -1,19 +1,30 @@
 """
-Compatibility shim — re-exports get_db from ssms.py.
+PostgreSQL connection — vedanta_risk database.
 
-The Postgres engine and SessionLocal were the original data store.
-Phase 2C (2026-05-25) retired the Postgres stack; SQL Server (vedanta) is now
-the sole database.  This file is kept so api/risk_scores.py (and any other
-Vinay-owned API file that does `from app.core.database import get_db`) continues
-to work without modification.
-
-Do NOT add new Postgres dependencies here.
+Exports
+-------
+engine       : SQLAlchemy engine (psycopg2)
+SessionLocal : sessionmaker factory — call SessionLocal() to get a session
+get_db       : FastAPI dependency that yields a session and closes it
 """
 
-from app.core.ssms import get_ssms_db as get_db  # noqa: F401
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-# SessionLocal is kept as a no-op alias so legacy import lines don't crash
-# at import time.  It should NOT be used to open new sessions.
-from app.core.ssms import SSMSSession as SessionLocal  # noqa: F401
+from app.core.config import settings
 
-__all__ = ["get_db", "SessionLocal"]
+engine = create_engine(
+    settings.DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=5,
+)
+
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

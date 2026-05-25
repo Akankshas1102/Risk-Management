@@ -4,7 +4,7 @@ CSV ingestion pipeline.
 Entry point: ingest_csv(file_path, source, on_success) -> dict
 
 Validates and summarises the CSV then writes a run record to SQL Server
-(ingestion_runs via IngestionRunSSMS).  The raw incident rows are NOT written
+(ingestion_runs via IngestionRun).  The raw incident rows are NOT written
 to a relational table — OL_INCIDENTS is the authoritative incident store and is
 populated externally.
 
@@ -19,8 +19,8 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import select
 
-from app.core.ssms import SSMSSession
-from app.models.ingestion import IngestionRunSSMS
+from app.core.database import SessionLocal
+from app.models.ingestion import IngestionRun
 from app.services.cleaner import clean_incidents
 
 
@@ -59,9 +59,9 @@ def ingest_csv(
     filename = Path(file_path).name
 
     # ── 1. Open the run record ────────────────────────────────────────────────
-    with SSMSSession() as ssms:
+    with SessionLocal() as ssms:
         ssms.add(
-            IngestionRunSSMS(
+            IngestionRun(
                 batch_id=str(batch_id),
                 source=source,
                 filename=filename,
@@ -81,9 +81,9 @@ def ingest_csv(
 
         # ── 2. Mark run as success ───────────────────────────────────────────
         finished_at = datetime.now(timezone.utc)
-        with SSMSSession() as ssms:
+        with SessionLocal() as ssms:
             run = ssms.execute(
-                select(IngestionRunSSMS).where(IngestionRunSSMS.batch_id == str(batch_id))
+                select(IngestionRun).where(IngestionRun.batch_id == str(batch_id))
             ).scalar_one()
             run.rows_received = rows_received
             run.rows_clean = rows_clean
@@ -97,9 +97,9 @@ def ingest_csv(
             on_success()
 
     except Exception as exc:
-        with SSMSSession() as ssms:
+        with SessionLocal() as ssms:
             run = ssms.execute(
-                select(IngestionRunSSMS).where(IngestionRunSSMS.batch_id == str(batch_id))
+                select(IngestionRun).where(IngestionRun.batch_id == str(batch_id))
             ).scalar_one()
             run.status = "failed"
             run.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)

@@ -33,7 +33,7 @@ import shap
 from sqlalchemy import select
 from xgboost import XGBRegressor
 
-from app.core.ssms import SSMSSession
+from app.core.database import SessionLocal
 from app.models.ol_incidents import OLIncident
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -49,7 +49,7 @@ _DEFAULT_SPARKLINE_MONTHS = 6
 # ---------------------------------------------------------------------------
 
 def _load_quarterly_cat_raw(site: str, session_factory=None) -> pd.DataFrame:
-    sf = session_factory or SSMSSession
+    sf = session_factory or SessionLocal
     with sf() as session:
         rows = session.execute(
             select(
@@ -74,7 +74,7 @@ def _load_monthly_cat_raw(site: str, session_factory=None) -> pd.DataFrame:
     Returns DataFrame with columns [YEAR (int), MONTH (int), INCIDENTCATNAME, count].
     Only rows where YEAR and MONTH are not null are included.
     """
-    sf = session_factory or SSMSSession
+    sf = session_factory or SessionLocal
     with sf() as session:
         rows = session.execute(
             select(
@@ -310,7 +310,7 @@ def compute_drivers_for_site(
     site              : Site name (SINAME in OL_INCIDENTS).
     quarter           : Target quarter 'YYYY-Qn'.  Defaults to most recent complete.
     n_sparkline_months: How many recent months to include in each driver's sparkline.
-    session_factory   : Override SSMSSession (for tests).
+    session_factory   : Override SessionLocal (for tests).
 
     Returns
     -------

@@ -1,16 +1,11 @@
-"""SQL Server ORM model for ingestion_runs.
-
-Tracks every CSV upload attempt (batch_id, status, row counts, timestamps).
-This is the SQL Server mirror of what was previously stored in Postgres;
-it is the sole store for ingestion history going forward.
-"""
+"""ORM model for ingestion_runs — tracks every CSV upload attempt."""
 
 from sqlalchemy import BigInteger, Column, DateTime, Integer, String, Text
 
-from app.models.ol_incidents import SSMSBase
+from app.models.ol_incidents import Base
 
 
-class IngestionRunSSMS(SSMSBase):
+class IngestionRun(Base):
     """One row per CSV upload attempt."""
 
     __tablename__ = "ingestion_runs"

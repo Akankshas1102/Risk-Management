@@ -1,9 +1,9 @@
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, Float, Integer, String
 
-from app.models.ol_incidents import SSMSBase
+from app.models.ol_incidents import Base
 
 
-class PredictionsCache(SSMSBase):
+class PredictionsCache(Base):
     __tablename__ = "predictions_cache"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -19,7 +19,7 @@ class PredictionsCache(SSMSBase):
     confidence_band = Column(String(10))                  # high/medium/low
 
 
-class ModelRun(SSMSBase):
+class ModelRun(Base):
     __tablename__ = "model_runs"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -30,5 +30,5 @@ class ModelRun(SSMSBase):
     holdout_rmse = Column(Float)
     holdout_mape = Column(Float)
     is_champion = Column(Boolean, default=False)
-    n_quarters_history = Column(Integer)                  # distinct quarters in risk_scores for this site
+    n_quarters_history = Column(Integer)
     notes = Column(String(2000))

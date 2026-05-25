@@ -2,7 +2,7 @@
 Reusable pipeline step functions used by the orchestrator.
 
 Each step function:
-- Takes a session_factory argument (SSMSSession by default)
+- Takes a session_factory argument (SessionLocal by default)
 - Returns a summary dict {sites_processed, rows_written, errors, ...}
 - Is idempotent: re-running produces no duplicates
 - Never catches exceptions — the orchestrator handles that
@@ -22,12 +22,12 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import func, select, text
 
-from app.core.ssms import SSMSSession
+from app.core.database import SessionLocal
 from app.ml.drivers import compute_drivers_for_site
 from app.ml.forecaster import predict_next_n_quarters
 from app.models.drivers import Recommendation, RiskDriver
 from app.models.ol_incidents import OLIncident
-from app.models.pipeline import RiskScoreSSMS
+from app.models.pipeline import RiskScore
 from app.models.predictions import ModelRun, PredictionsCache
 from app.services.recommendations import generate_recommendations
 from app.services.risk_score import (
@@ -42,6 +42,15 @@ from app.services.risk_score import (
 )
 
 
+def _to_builtin(value):
+    """Convert numpy / pandas scalars into plain Python types for SQLAlchemy."""
+    if pd.isna(value):
+        return None
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Step 1 — Risk scores (SQL Server OL_INCIDENTS → risk_scores table)
 # ---------------------------------------------------------------------------
@@ -51,7 +60,7 @@ def step_risk_scores(sf=None) -> dict:
     Compute composite risk scores from OL_INCIDENTS and persist to SQL Server
     risk_scores table.  Uses _DEFAULT_WEIGHTS (0.35/0.30/0.20/0.15).
     """
-    sf = sf or SSMSSession
+    sf = sf or SessionLocal
 
     # Load incidents as a scoring DataFrame — RTRIM/LTRIM site names so SQL Server's
     # collation (which ignores trailing spaces in UNIQUE constraints) and pandas see
@@ -152,7 +161,7 @@ def step_risk_scores(sf=None) -> dict:
 
     with sf() as session:
         for rec in records:
-            session.add(RiskScoreSSMS(**rec))
+            session.add(RiskScore(**rec))
         session.commit()
 
     sites = len({r["site"] for r in records})
@@ -176,7 +185,7 @@ def _all_sites(sf) -> list[tuple[str, str]]:
 
 def step_forecasters(sf=None, n_quarters: int = 3) -> dict:
     """Train forecasters for all sites and persist predictions_cache + model_runs."""
-    sf = sf or SSMSSession
+    sf = sf or SessionLocal
     trained_at = datetime.now(timezone.utc).replace(tzinfo=None)
     all_pairs = _all_sites(sf)
 
@@ -193,9 +202,9 @@ def step_forecasters(sf=None, n_quarters: int = 3) -> dict:
                 pred_records.append({
                     "site": site, "business_unit": bu,
                     "target_quarter": row["target_quarter"],
-                    "predicted_count": row["predicted_count"],
-                    "lower_ci": row["lower_ci"],
-                    "upper_ci": row["upper_ci"],
+                    "predicted_count": _to_builtin(row["predicted_count"]),
+                    "lower_ci": _to_builtin(row["lower_ci"]),
+                    "upper_ci": _to_builtin(row["upper_ci"]),
                     "model_name": row["model_name"],
                     "trained_at": trained_at,
                     "training_data_through": row.get("training_data_through"),
@@ -210,8 +219,8 @@ def step_forecasters(sf=None, n_quarters: int = 3) -> dict:
                     "model_name": name, "site": site,
                     "trained_at": trained_at,
                     "training_rows": int(first.get(f"{key}_n") or 0),
-                    "holdout_rmse": rmse,
-                    "holdout_mape": first.get(f"{key}_mape"),
+                    "holdout_rmse": _to_builtin(rmse),
+                    "holdout_mape": _to_builtin(first.get(f"{key}_mape")),
                     "is_champion": False,
                     "notes": f"confidence={first['confidence_band']}",
                 })
@@ -309,7 +318,7 @@ def _get_site_context(site: str, sf) -> dict:
     )
     return {
         "site": site,
-        "quarter": f"{row.YEAR}-{row.QUARTER}",
+        "quarter": f"{row.year}-{row.quarter}",
         "total_incidents_qtr": row.total,
         "delta_qtr_pct": delta,
         "reporting_lag_p90": float(np.percentile(lags, 90)) if lags else None,
@@ -319,7 +328,7 @@ def _get_site_context(site: str, sf) -> dict:
 
 def step_drivers(sf=None) -> dict:
     """Compute SHAP drivers and recommendations for all sites."""
-    sf = sf or SSMSSession
+    sf = sf or SessionLocal
     all_pairs = _all_sites(sf)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     errors = 0
@@ -395,10 +404,10 @@ def step_backtest(sf=None) -> dict:
 
     Parameters
     ----------
-    sf : Unused — backtest module manages its own SSMSSession connections.
+    sf : Unused — backtest module manages its own DB connections.
          Accepted for API consistency with the other step functions.
     """
-    # run_all_backtests handles its own DB connections via SSMSSession
+    # run_all_backtests handles its own DB connections via SessionLocal
     from app.ml.backtest import run_all_backtests  # noqa: PLC0415
 
     result = run_all_backtests()   # site_pairs=None → all sites from OL_INCIDENTS

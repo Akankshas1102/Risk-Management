@@ -39,8 +39,13 @@ sys.path.insert(0, str(BACKEND))
 import pandas as pd
 from sqlalchemy import text
 
-from app.core.ssms import ssms_engine, SSMSSession
-from app.models.ol_incidents import OLIncident, SSMSBase
+from app.core.database import engine, SessionLocal
+from app.models.ol_incidents import OLIncident, Base
+import app.models.predictions  # noqa: F401 — registers PredictionsCache, ModelRun
+import app.models.drivers      # noqa: F401 — registers RiskDriver, Recommendation
+import app.models.pipeline     # noqa: F401 — registers PipelineRun, RiskScore
+import app.models.backtest     # noqa: F401 — registers BacktestResult
+import app.models.ingestion    # noqa: F401 — registers IngestionRun
 
 # ── CSV path ──────────────────────────────────────────────────────────────────
 CSV_PATH = REPO_ROOT / "data" / "raw" / "OL_INCIDENTS_20260518_142042.csv"
@@ -112,15 +117,15 @@ def load_csv(csv_path: Path = CSV_PATH) -> None:
 
     # ── Create / recreate the ol_incidents table ──────────────────────────
     print("Creating tables in Postgres (drop + recreate ol_incidents)...")
-    OLIncident.__table__.drop(ssms_engine, checkfirst=True)
-    SSMSBase.metadata.create_all(ssms_engine)  # creates ALL model tables
+    OLIncident.__table__.drop(engine, checkfirst=True)
+    Base.metadata.create_all(engine)  # creates ALL model tables
     print("  Tables created.")
 
     # ── Bulk insert via pandas to_sql ─────────────────────────────────────
     print(f"Inserting {len(df):,} rows into ol_incidents...")
     df.to_sql(
         "ol_incidents",
-        ssms_engine,
+        engine,
         if_exists="append",     # table already created above
         index=False,
         chunksize=2000,
@@ -129,7 +134,7 @@ def load_csv(csv_path: Path = CSV_PATH) -> None:
     print("  Done.")
 
     # ── Quick verification ────────────────────────────────────────────────
-    with ssms_engine.connect() as conn:
+    with engine.connect() as conn:
         count = conn.execute(text("SELECT COUNT(*) FROM ol_incidents")).scalar()
     print(f"  Rows in ol_incidents: {count:,}")
 

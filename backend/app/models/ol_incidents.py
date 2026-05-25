@@ -14,11 +14,11 @@ from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import DeclarativeBase
 
 
-class SSMSBase(DeclarativeBase):
+class Base(DeclarativeBase):
     pass
 
 
-class OLIncident(SSMSBase):
+class OLIncident(Base):
     __tablename__ = "ol_incidents"
 
     # Explicit column name mapping: Python attribute (uppercase) → Postgres column (lowercase)
