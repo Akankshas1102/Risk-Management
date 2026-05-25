@@ -38,13 +38,14 @@ def _get_site_context(site: str, sf) -> dict:
     with sf() as session:
         row = session.execute(
             text("""
-                SELECT TOP 1 YEAR, QUARTER, COUNT(*) AS total
-                FROM OL_INCIDENTS
-                WHERE SINAME = :s AND TRY_CAST(YEAR AS INT) > 2000
-                GROUP BY YEAR, QUARTER
-                ORDER BY CAST(YEAR AS INT)*10 +
-                    CASE QUARTER WHEN 'Q4' THEN 0 WHEN 'Q1' THEN 1
+                SELECT year, quarter, COUNT(*) AS total
+                FROM ol_incidents
+                WHERE siname = :s AND CAST(NULLIF(year, '') AS INTEGER) > 2000
+                GROUP BY year, quarter
+                ORDER BY CAST(NULLIF(year, '') AS INTEGER)*10 +
+                    CASE quarter WHEN 'Q4' THEN 0 WHEN 'Q1' THEN 1
                                  WHEN 'Q2' THEN 2 ELSE 3 END DESC
+                LIMIT 1
             """),
             {"s": site},
         ).first()
@@ -53,25 +54,26 @@ def _get_site_context(site: str, sf) -> dict:
 
         prev = session.execute(
             text("""
-                SELECT TOP 1 COUNT(*) AS total FROM OL_INCIDENTS
-                WHERE SINAME = :s AND TRY_CAST(YEAR AS INT) > 2000
-                  AND NOT (YEAR = :y AND QUARTER = :q)
-                GROUP BY YEAR, QUARTER
-                ORDER BY CAST(YEAR AS INT)*10 +
-                    CASE QUARTER WHEN 'Q4' THEN 0 WHEN 'Q1' THEN 1
+                SELECT COUNT(*) AS total FROM ol_incidents
+                WHERE siname = :s AND CAST(NULLIF(year, '') AS INTEGER) > 2000
+                  AND NOT (year = :y AND quarter = :q)
+                GROUP BY year, quarter
+                ORDER BY CAST(NULLIF(year, '') AS INTEGER)*10 +
+                    CASE quarter WHEN 'Q4' THEN 0 WHEN 'Q1' THEN 1
                                  WHEN 'Q2' THEN 2 ELSE 3 END DESC
+                LIMIT 1
             """),
-            {"s": site, "y": row.YEAR, "q": row.QUARTER},
+            {"s": site, "y": row.year, "q": row.quarter},
         ).first()
 
         lag_rows = session.execute(
             text("""
-                SELECT OCCUREDDATE, REPORTEDDATE FROM OL_INCIDENTS
-                WHERE SINAME = :s AND YEAR = :y AND QUARTER = :q
-                  AND OCCUREDDATE IS NOT NULL AND REPORTEDDATE IS NOT NULL
-                  AND LEN(OCCUREDDATE) = 10 AND LEN(REPORTEDDATE) = 10
+                SELECT occureddate, reporteddate FROM ol_incidents
+                WHERE siname = :s AND year = :y AND quarter = :q
+                  AND occureddate IS NOT NULL AND reporteddate IS NOT NULL
+                  AND LENGTH(occureddate) = 10 AND LENGTH(reporteddate) = 10
             """),
-            {"s": site, "y": row.YEAR, "q": row.QUARTER},
+            {"s": site, "y": row.year, "q": row.quarter},
         ).all()
 
         bu_row = session.execute(
@@ -84,7 +86,7 @@ def _get_site_context(site: str, sf) -> dict:
     for r in lag_rows:
         try:
             lags.append(
-                (pd.Timestamp(r.REPORTEDDATE) - pd.Timestamp(r.OCCUREDDATE)).days
+                (pd.Timestamp(r.reporteddate) - pd.Timestamp(r.occureddate)).days
             )
         except Exception:
             pass
@@ -95,7 +97,7 @@ def _get_site_context(site: str, sf) -> dict:
     )
     return {
         "site": site,
-        "quarter": f"{row.YEAR}-{row.QUARTER}",
+        "quarter": f"{row.year}-{row.quarter}",
         "total_incidents_qtr": row.total,
         "delta_qtr_pct": delta,
         "reporting_lag_p90": float(np.percentile(lags, 90)) if lags else None,

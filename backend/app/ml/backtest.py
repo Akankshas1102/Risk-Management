@@ -77,7 +77,7 @@ def _get_champion_model(site: str) -> str | None:
     # Fall back to predictions_cache model_name
     with SSMSSession() as s:
         row = s.execute(
-            text("SELECT TOP 1 model_name FROM predictions_cache WHERE site = :s ORDER BY trained_at DESC"),
+            text("SELECT model_name FROM predictions_cache WHERE site = :s ORDER BY trained_at DESC LIMIT 1"),
             {"s": site},
         ).first()
     return row[0] if row else None

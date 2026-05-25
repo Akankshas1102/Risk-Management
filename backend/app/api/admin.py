@@ -91,10 +91,10 @@ def data_freshness(db: Session = Depends(get_ssms_db)):
     # Latest incident date (OCCUREDDATE is varchar YYYY-MM-DD; MAX works on ISO strings)
     data_date_row = db.execute(
         text("""
-            SELECT MAX(OCCUREDDATE) AS latest_date
-            FROM OL_INCIDENTS
-            WHERE TRY_CAST(YEAR AS INT) > 2000
-              AND LEN(OCCUREDDATE) = 10
+            SELECT MAX(occureddate) AS latest_date
+            FROM ol_incidents
+            WHERE CAST(NULLIF(year, '') AS INTEGER) > 2000
+              AND LENGTH(occureddate) = 10
         """)
     ).first()
 

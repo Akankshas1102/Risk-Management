@@ -7,12 +7,8 @@ _ENV_FILE = _PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str
-    # SQL Server (vedanta) — used by the analytics API
-    SSMS_DATABASE_URL: str = (
-        "mssql+pyodbc://sa:m00se_1234@localhost/vedanta"
-        "?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes"
-    )
+    # PostgreSQL connection — used by all API + ML pipeline components
+    DATABASE_URL: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/vedanta_risk"
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
     # Cron expression for the nightly automatic retrain (UTC).

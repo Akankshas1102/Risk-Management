@@ -234,9 +234,9 @@ def get_kpis(
     try:
         pred = db.execute(
             text(
-                "SELECT TOP 1 predicted_count FROM predictions_cache "
+                "SELECT predicted_count FROM predictions_cache "
                 "WHERE site = :s "
-                "ORDER BY trained_at DESC"
+                "ORDER BY trained_at DESC LIMIT 1"
             ),
             {"s": site or ""},
         ).scalar()
