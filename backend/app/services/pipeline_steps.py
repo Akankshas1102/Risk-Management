@@ -16,6 +16,7 @@ Steps (in execution order):
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 import numpy as np
@@ -40,6 +41,8 @@ from app.services.risk_score import (
     compute_severity_index,
     compute_velocity_index,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _to_builtin(value):
@@ -308,7 +311,7 @@ def _get_site_context(site: str, sf) -> dict:
     lags = []
     for r in lag_rows:
         try:
-            lags.append((pd.Timestamp(r.REPORTEDDATE) - pd.Timestamp(r.OCCUREDDATE)).days)
+            lags.append((pd.Timestamp(r.reporteddate) - pd.Timestamp(r.occureddate)).days)
         except Exception:
             pass
 
@@ -376,7 +379,8 @@ def step_drivers(sf=None) -> dict:
 
             driver_rows += min(10, len(drivers_df))
             rec_rows += len(recs)
-        except Exception:
+        except Exception as exc:
+            logger.error("step_drivers failed for site %r: %s", site, exc, exc_info=True)
             errors += 1
 
     return {
