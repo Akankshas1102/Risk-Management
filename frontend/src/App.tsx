@@ -9,6 +9,7 @@ import { Predictions }        from '@/tabs/Predictions'
 import { Recommendations }    from '@/tabs/Recommendations'
 import { AIInsights }         from '@/tabs/AIInsights'
 import { Reports }            from '@/tabs/Reports'
+import { DataHealth }         from '@/tabs/DataHealth'
 
 const TAB_COMPONENTS: Record<TabId, React.ComponentType> = {
   'overview':           Overview,
@@ -19,6 +20,7 @@ const TAB_COMPONENTS: Record<TabId, React.ComponentType> = {
   'recommendations':    Recommendations,
   'ai-insights':        AIInsights,
   'reports':            Reports,
+  'data-health':        DataHealth,
 }
 
 export default function App() {

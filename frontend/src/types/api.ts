@@ -131,3 +131,81 @@ export interface FreshnessResponse {
   latest_predicted_quarter: string | null
   last_ingest_at: string | null
 }
+
+// ---------- Diagnostics (Data Health tab) ----------
+
+export interface DiagnosticsStep {
+  status: string | null
+  duration_s: number | null
+}
+
+export interface DiagnosticsLastRun {
+  id?: number
+  trigger?: string | null
+  status?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+  total_duration_s?: number | null
+  steps?: Record<string, DiagnosticsStep>
+  error_summary?: string | null
+}
+
+export interface DiagnosticsSite {
+  site: string
+  business_unit: string | null
+  incidents: number
+  n_months: number
+  first_incident: string | null
+  last_incident: string | null
+  champion_model: string | null
+  holdout_rmse: number | null
+  holdout_mape: number | null
+  training_rows: number | null
+  last_trained_at: string | null
+  backtest_n_months: number
+  backtest_mean_ape: number | null
+  backtest_pct_within_20: number | null
+  training_data_through: string | null
+  confidence_band: string | null
+  status: string
+}
+
+export interface DiagnosticsVariant {
+  canonical: string
+  variant_count: number
+  variants: string
+}
+
+export interface DiagnosticsDataIssues {
+  total_rows: number
+  null_year: number
+  null_month: number
+  null_quarter: number
+  null_severity: number
+  invalid_severity: number
+  pre_2000_year: number
+}
+
+export interface DiagnosticsResponse {
+  pipeline: {
+    last_run: DiagnosticsLastRun
+    next_run_at: string | null
+  }
+  freshness: {
+    latest_data_date: string | null
+    latest_predicted_quarter: string | null
+  }
+  summary: {
+    total_sites: number
+    healthy: number
+    sparse_bu_fallback: number
+    insufficient_data: number
+    low_accuracy: number
+  }
+  sites: DiagnosticsSite[]
+  alerts: {
+    site_variants: DiagnosticsVariant[]
+    category_variants: DiagnosticsVariant[]
+    data_issues: DiagnosticsDataIssues
+  }
+}

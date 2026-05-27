@@ -233,3 +233,159 @@ def get_site_bu(site: str, session_factory=None) -> Optional[str]:
             .limit(1)
         ).first()
     return row[0] if row else None
+
+
+# ---------------------------------------------------------------------------
+# QUARTERLY series builders (new — used by quarterly forecaster)
+# ---------------------------------------------------------------------------
+
+def _current_fiscal_quarter_start() -> pd.Timestamp:
+    """
+    Return the first day of the CURRENT (potentially incomplete) fiscal quarter
+    as a calendar Timestamp.
+
+    Fiscal quarters used in this project:
+      Q4 = Jan-Mar  (start = year-01-01)
+      Q1 = Apr-Jun  (start = year-04-01)
+      Q2 = Jul-Sep  (start = year-07-01)
+      Q3 = Oct-Dec  (start = year-10-01)
+    """
+    today = pd.Timestamp.today().normalize()
+    m = today.month
+    if m <= 3:
+        return pd.Timestamp(year=today.year, month=1, day=1)
+    if m <= 6:
+        return pd.Timestamp(year=today.year, month=4, day=1)
+    if m <= 9:
+        return pd.Timestamp(year=today.year, month=7, day=1)
+    return pd.Timestamp(year=today.year, month=10, day=1)
+
+
+def _df_to_quarterly_series(
+    raw: pd.DataFrame,
+    pad_to: Optional[pd.Timestamp] = None,
+    exclude_partial: bool = True,
+) -> pd.DataFrame:
+    """
+    Aggregate raw incident rows to a continuous quarterly [ds, y] series.
+
+    Parameters
+    ----------
+    raw             : DataFrame with YEAR (str/int) and MONTH (int) columns.
+    pad_to          : Latest month to pad to (zero-fill any missing quarters).
+    exclude_partial : Drop the currently-open quarter so the model never trains
+                      on incomplete months (which would otherwise drag predictions down).
+
+    Returns
+    -------
+    DataFrame [ds, y] where ds = first day of the FISCAL quarter and y = sum of
+    incidents in that quarter.  Missing quarters in the range are zero-filled.
+    """
+    if raw.empty:
+        return pd.DataFrame(columns=["ds", "y"])
+
+    raw = raw.copy()
+    raw["YEAR"] = raw["YEAR"].astype(int)
+    raw["ds_month"] = pd.to_datetime(
+        {"year": raw["YEAR"], "month": raw["MONTH"], "day": 1}
+    )
+
+    # Map each month -> fiscal-quarter start (Q4=Jan, Q1=Apr, Q2=Jul, Q3=Oct)
+    def _q_start(d: pd.Timestamp) -> pd.Timestamp:
+        m = d.month
+        if m <= 3:
+            return pd.Timestamp(year=d.year, month=1, day=1)
+        if m <= 6:
+            return pd.Timestamp(year=d.year, month=4, day=1)
+        if m <= 9:
+            return pd.Timestamp(year=d.year, month=7, day=1)
+        return pd.Timestamp(year=d.year, month=10, day=1)
+
+    raw["q_start"] = raw["ds_month"].apply(_q_start)
+
+    counts = (
+        raw.groupby("q_start")
+        .size()
+        .reset_index(name="y")
+        .rename(columns={"q_start": "ds"})
+        .sort_values("ds")
+        .reset_index(drop=True)
+    )
+
+    if len(counts) == 0:
+        return counts
+
+    # Pad missing quarters in the observed range with 0
+    end = counts["ds"].max()
+    if pad_to is not None:
+        pad_quarter_start = _q_start(pd.Timestamp(pad_to))
+        if pad_quarter_start > end:
+            end = pad_quarter_start
+
+    full_range = pd.date_range(counts["ds"].min(), end, freq="QS-JAN")
+    # QS-JAN gives quarters starting Jan/Apr/Jul/Oct which matches our fiscal layout.
+    counts = (
+        counts.set_index("ds")
+        .reindex(full_range, fill_value=0)
+        .reset_index()
+        .rename(columns={"index": "ds"})
+    )
+    counts.columns = ["ds", "y"]
+
+    # Drop the currently-open quarter — it's still receiving incidents so its
+    # count would otherwise be artificially low and would train the model
+    # to predict declining counts.
+    if exclude_partial:
+        partial_start = _current_fiscal_quarter_start()
+        counts = counts[counts["ds"] < partial_start].reset_index(drop=True)
+
+    return counts
+
+
+def _build_quarterly_lag_features(
+    series: pd.DataFrame,
+    lags: list[int] = None,
+) -> pd.DataFrame:
+    """
+    Add lag and seasonal features to a quarterly [ds, y] DataFrame for XGBoost.
+
+    Lags are in *quarters* — lag_4 = 4 quarters ago = year-over-year.
+    Returned columns: ds, y, fiscal_q (1-4), lag_1, lag_2, lag_4, rolling_2q.
+    Rows with any NaN (at the start) are dropped.
+    """
+    if lags is None:
+        lags = [1, 2, 4]
+
+    df = series.copy()
+
+    # fiscal_q: 1=Q4 (Jan), 2=Q1 (Apr), 3=Q2 (Jul), 4=Q3 (Oct)
+    def _fiscal_q_num(d: pd.Timestamp) -> int:
+        m = d.month
+        return {1: 1, 4: 2, 7: 3, 10: 4}.get(m, 1)
+
+    df["fiscal_q"] = df["ds"].apply(_fiscal_q_num)
+
+    for lag in lags:
+        df[f"lag_{lag}"] = df["y"].shift(lag)
+
+    df["rolling_2q"] = df["y"].shift(1).rolling(2).mean()
+
+    return df.dropna().reset_index(drop=True)
+
+
+def build_site_quarterly_series(site: str, session_factory=None) -> pd.DataFrame:
+    """
+    [ds, y] quarterly series for a site.  Missing quarters filled with 0.
+    Zero-padded to the global OL_INCIDENTS data end.
+    The currently-open (partial) quarter is EXCLUDED.
+    """
+    raw = _load_raw(site=site, session_factory=session_factory)
+    pad_to = get_global_max_date(session_factory)
+    return _df_to_quarterly_series(raw, pad_to=pad_to, exclude_partial=True)
+
+
+def build_bu_quarterly_series(business_unit: str, session_factory=None) -> pd.DataFrame:
+    """[ds, y] quarterly series for a whole BU (all sites aggregated)."""
+    raw = _load_raw(business_unit=business_unit, session_factory=session_factory)
+    pad_to = get_global_max_date(session_factory)
+    return _df_to_quarterly_series(raw, pad_to=pad_to, exclude_partial=True)

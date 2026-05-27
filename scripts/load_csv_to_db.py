@@ -48,7 +48,11 @@ import app.models.backtest     # noqa: F401 — registers BacktestResult
 import app.models.ingestion    # noqa: F401 — registers IngestionRun
 
 # ── CSV path ──────────────────────────────────────────────────────────────────
-CSV_PATH = REPO_ROOT / "data" / "raw" / "OL_INCIDENTS_20260518_142042.csv"
+# Prefer the cleaned CSV produced by scripts/clean_csv.py.
+# Falls back to the raw export if the cleaned file isn't present.
+_CLEAN_PATH = REPO_ROOT / "data" / "raw" / "OL_INCIDENTS_clean.csv"
+_RAW_PATH   = REPO_ROOT / "data" / "raw" / "OL_INCIDENTS_20260518_142042.csv"
+CSV_PATH    = _CLEAN_PATH if _CLEAN_PATH.exists() else _RAW_PATH
 
 
 def _derive_quarter(month: int) -> str:

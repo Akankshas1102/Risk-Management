@@ -1,0 +1,514 @@
+import { useState } from 'react'
+import { formatDistanceToNow } from 'date-fns'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Database,
+  RefreshCw,
+  Wrench,
+  XCircle,
+} from 'lucide-react'
+import { useDiagnostics } from '@/api/hooks'
+import { KpiCard } from '@/components/common/KpiCard'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
+import type { DiagnosticsSite } from '@/types/api'
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function statusColor(status: string): string {
+  switch (status) {
+    case 'Healthy':            return 'bg-green-100 text-green-700 border-green-200'
+    case 'OK':                 return 'bg-blue-100 text-blue-700 border-blue-200'
+    case 'Sparse - BU fallback': return 'bg-amber-100 text-amber-700 border-amber-200'
+    case 'Low accuracy':       return 'bg-orange-100 text-orange-700 border-orange-200'
+    case 'No backtest':        return 'bg-slate-100 text-slate-600 border-slate-200'
+    case 'Insufficient data':  return 'bg-red-100 text-red-700 border-red-200'
+    default:                   return 'bg-slate-100 text-slate-600 border-slate-200'
+  }
+}
+
+function stepDot(status: string | null | undefined) {
+  if (status === 'ok') {
+    return <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-500" />
+  }
+  if (status === 'error') {
+    return <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
+  }
+  return <span className="inline-block h-2.5 w-2.5 rounded-full bg-slate-300" />
+}
+
+function formatRelative(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  try {
+    return formatDistanceToNow(new Date(iso), { addSuffix: true })
+  } catch {
+    return iso
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+function PipelineBanner({
+  lastRun,
+  nextRunAt,
+  latestData,
+  latestPredicted,
+  loading,
+}: {
+  lastRun: any
+  nextRunAt: string | null
+  latestData: string | null
+  latestPredicted: string | null
+  loading: boolean
+}) {
+  if (loading) {
+    return <Skeleton className="h-32 w-full" />
+  }
+
+  const steps = lastRun?.steps ?? {}
+  const stepNames = ['risk_scores', 'forecasters', 'backtest', 'drivers']
+
+  return (
+    <Card className="p-5">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            Last Pipeline Run
+          </p>
+          <p className="text-sm font-semibold text-slate-800 mt-1">
+            {lastRun?.status ? lastRun.status.toUpperCase() : '—'}
+          </p>
+          <p className="text-xs text-slate-500">
+            {formatRelative(lastRun?.finished_at)} ·{' '}
+            {lastRun?.total_duration_s != null ? `${lastRun.total_duration_s}s` : '—'}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">trigger: {lastRun?.trigger ?? '—'}</p>
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            Pipeline Steps
+          </p>
+          <div className="mt-2 space-y-1.5">
+            {stepNames.map((name) => (
+              <div key={name} className="flex items-center gap-2 text-xs text-slate-600">
+                {stepDot(steps[name]?.status)}
+                <span className="font-medium">{name}</span>
+                <span className="text-slate-400 ml-auto tabular-nums">
+                  {steps[name]?.duration_s != null ? `${steps[name].duration_s}s` : '—'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            Next Scheduled Run
+          </p>
+          <p className="text-sm font-semibold text-slate-800 mt-1 flex items-center gap-1.5">
+            <Clock className="h-4 w-4 text-slate-400" />
+            {nextRunAt ? formatRelative(nextRunAt) : 'Not scheduled'}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">cron: nightly 02:00 UTC</p>
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            Data Freshness
+          </p>
+          <p className="text-sm font-semibold text-slate-800 mt-1 flex items-center gap-1.5">
+            <Database className="h-4 w-4 text-slate-400" />
+            {latestData ?? '—'}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            latest predicted quarter: {latestPredicted ?? '—'}
+          </p>
+        </div>
+      </div>
+      {lastRun?.error_summary && (
+        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+          <p className="font-semibold mb-1">Last run errors:</p>
+          <p className="font-mono whitespace-pre-wrap">{lastRun.error_summary}</p>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function SiteHealthTable({
+  sites,
+  loading,
+  query,
+  filter,
+}: {
+  sites: DiagnosticsSite[]
+  loading: boolean
+  query: string
+  filter: string
+}) {
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="p-5">
+          <Skeleton className="h-6 w-full mb-3" />
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-full mb-2" />
+          ))}
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const q = query.trim().toLowerCase()
+  const filtered = sites.filter((s) => {
+    if (q && !s.site.toLowerCase().includes(q) && !(s.business_unit ?? '').toLowerCase().includes(q)) {
+      return false
+    }
+    if (filter !== 'all' && s.status !== filter) {
+      return false
+    }
+    return true
+  })
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between">
+          <span>Per-Site Data & Model Health</span>
+          <span className="text-xs font-normal text-slate-400">
+            {filtered.length} of {sites.length} sites
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400">
+              <th className="px-4 py-2.5 text-left">Site</th>
+              <th className="px-4 py-2.5 text-left">BU</th>
+              <th className="px-4 py-2.5 text-right">Incidents</th>
+              <th className="px-4 py-2.5 text-right">Months</th>
+              <th className="px-4 py-2.5 text-left">Champion</th>
+              <th className="px-4 py-2.5 text-right">Holdout MAPE</th>
+              <th className="px-4 py-2.5 text-right">Backtest ±20%</th>
+              <th className="px-4 py-2.5 text-left">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="px-4 py-12 text-center text-slate-400">
+                  No sites match the current filters.
+                </td>
+              </tr>
+            ) : (
+              filtered.map((s) => (
+                <tr key={s.site} className="border-b border-slate-50 hover:bg-slate-50">
+                  <td className="px-4 py-2.5 font-medium text-slate-700 max-w-[180px]">
+                    <span className="truncate block" title={s.site}>{s.site}</span>
+                  </td>
+                  <td className="px-4 py-2.5 text-slate-500 text-xs max-w-[140px]">
+                    <span className="truncate block" title={s.business_unit ?? ''}>
+                      {s.business_unit ?? '—'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">
+                    {s.incidents.toLocaleString()}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{s.n_months}</td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600 capitalize">
+                    {s.champion_model ?? '—'}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-xs">
+                    {s.holdout_mape != null ? `${s.holdout_mape}%` : '—'}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-xs">
+                    {s.backtest_pct_within_20 != null ? `${s.backtest_pct_within_20}%` : '—'}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className={cn(
+                      'inline-block text-xs px-2 py-0.5 rounded-full border whitespace-nowrap',
+                      statusColor(s.status),
+                    )}>
+                      {s.status}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  )
+}
+
+function AlertsPanel({
+  siteVariants,
+  categoryVariants,
+  dataIssues,
+  loading,
+}: {
+  siteVariants: any[]
+  categoryVariants: any[]
+  dataIssues: any
+  loading: boolean
+}) {
+  if (loading) {
+    return <Skeleton className="h-48 w-full" />
+  }
+
+  const issueChips = [
+    { label: 'Null year',          count: dataIssues?.null_year ?? 0 },
+    { label: 'Null month',         count: dataIssues?.null_month ?? 0 },
+    { label: 'Null quarter',       count: dataIssues?.null_quarter ?? 0 },
+    { label: 'Null severity',      count: dataIssues?.null_severity ?? 0 },
+    { label: 'Invalid severity',   count: dataIssues?.invalid_severity ?? 0 },
+    { label: 'Pre-2000 year',      count: dataIssues?.pre_2000_year ?? 0 },
+  ]
+  const hasAnyIssue = issueChips.some((c) => c.count > 0)
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Data quality counts */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-500" />
+            Data Quality Issues
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <p className="text-xs text-slate-500">
+            Total rows: <span className="font-semibold tabular-nums">{dataIssues?.total_rows?.toLocaleString() ?? '—'}</span>
+          </p>
+          <div className="space-y-1.5">
+            {issueChips.map((c) => (
+              <div key={c.label} className="flex items-center justify-between text-xs">
+                <span className="text-slate-600">{c.label}</span>
+                <span className={cn(
+                  'tabular-nums font-semibold px-2 py-0.5 rounded',
+                  c.count > 0 ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700',
+                )}>
+                  {c.count}
+                </span>
+              </div>
+            ))}
+          </div>
+          {!hasAnyIssue && (
+            <div className="flex items-center gap-1.5 text-xs text-green-600 pt-2">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              No data quality issues detected.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Site name variants */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wrench className="h-4 w-4 text-orange-500" />
+            Site Name Variants
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {siteVariants.length === 0 ? (
+            <p className="text-xs text-slate-400 italic">No duplicate site spellings detected.</p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {siteVariants.map((v) => (
+                <div key={v.canonical} className="text-xs">
+                  <p className="font-semibold text-slate-700">{v.canonical}</p>
+                  <p className="text-slate-500 text-[11px] mt-0.5 break-words">{v.variants}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Category name variants */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wrench className="h-4 w-4 text-orange-500" />
+            Category Name Variants
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {categoryVariants.length === 0 ? (
+            <p className="text-xs text-slate-400 italic">No duplicate category spellings detected.</p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {categoryVariants.map((v) => (
+                <div key={v.canonical} className="text-xs">
+                  <p className="font-semibold text-slate-700">{v.canonical}</p>
+                  <p className="text-slate-500 text-[11px] mt-0.5 break-words">{v.variants}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+export function DataHealth() {
+  const diag = useDiagnostics()
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState('all')
+
+  const data = diag.data
+  const loading = diag.isPending
+  const summary = data?.summary
+
+  const statusFilters = [
+    { value: 'all',                   label: 'All' },
+    { value: 'Healthy',               label: 'Healthy' },
+    { value: 'OK',                    label: 'OK' },
+    { value: 'Sparse - BU fallback',  label: 'Sparse' },
+    { value: 'Low accuracy',          label: 'Low accuracy' },
+    { value: 'No backtest',           label: 'No backtest' },
+    { value: 'Insufficient data',     label: 'Insufficient' },
+  ]
+
+  if (diag.isError) {
+    return (
+      <Card className="p-8">
+        <div className="flex flex-col items-center gap-3 text-slate-500">
+          <XCircle className="h-10 w-10 text-red-400" />
+          <p className="font-semibold">Failed to load diagnostics</p>
+          <button
+            onClick={() => diag.refetch()}
+            className="text-sm text-brand-600 hover:underline flex items-center gap-1"
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Retry
+          </button>
+        </div>
+      </Card>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* ── Page heading ─────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+            <Wrench className="h-5 w-5 text-slate-500" />
+            Data & Model Health
+          </h1>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Pipeline status, per-site data quality, and source-data anomalies.
+          </p>
+        </div>
+        <button
+          onClick={() => diag.refetch()}
+          className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1 border border-slate-200 rounded px-3 py-1.5"
+        >
+          <RefreshCw className={cn('h-3.5 w-3.5', diag.isFetching && 'animate-spin')} />
+          Refresh
+        </button>
+      </div>
+
+      {/* ── Pipeline banner ──────────────────────────────────────────── */}
+      <PipelineBanner
+        lastRun={data?.pipeline?.last_run}
+        nextRunAt={data?.pipeline?.next_run_at ?? null}
+        latestData={data?.freshness?.latest_data_date ?? null}
+        latestPredicted={data?.freshness?.latest_predicted_quarter ?? null}
+        loading={loading}
+      />
+
+      {/* ── Summary KPI row ─────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <KpiCard
+          title="Total Sites"
+          value={summary?.total_sites ?? 0}
+          subtitle="in ol_incidents"
+          loading={loading}
+        />
+        <KpiCard
+          title="Healthy"
+          value={summary?.healthy ?? 0}
+          subtitle="backtest ≥ 75%"
+          accentColor="border-l-green-500"
+          loading={loading}
+        />
+        <KpiCard
+          title="Sparse / BU Fallback"
+          value={summary?.sparse_bu_fallback ?? 0}
+          subtitle="< 50 incidents or < 12 months"
+          accentColor="border-l-amber-400"
+          loading={loading}
+        />
+        <KpiCard
+          title="Insufficient Data"
+          value={summary?.insufficient_data ?? 0}
+          subtitle="no champion model"
+          accentColor="border-l-red-500"
+          loading={loading}
+        />
+      </div>
+
+      {/* ── Filters ──────────────────────────────────────────────────── */}
+      <Card className="p-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="text"
+            placeholder="Search site or BU..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="border border-slate-200 rounded px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-brand-200"
+          />
+          <div className="flex flex-wrap gap-1.5">
+            {statusFilters.map((f) => (
+              <button
+                key={f.value}
+                onClick={() => setFilter(f.value)}
+                className={cn(
+                  'text-xs px-2.5 py-1 rounded-full border transition',
+                  filter === f.value
+                    ? 'bg-brand-600 text-white border-brand-600'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50',
+                )}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </Card>
+
+      {/* ── Per-site table ──────────────────────────────────────────── */}
+      <SiteHealthTable
+        sites={data?.sites ?? []}
+        loading={loading}
+        query={query}
+        filter={filter}
+      />
+
+      {/* ── Alerts ───────────────────────────────────────────────────── */}
+      <AlertsPanel
+        siteVariants={data?.alerts?.site_variants ?? []}
+        categoryVariants={data?.alerts?.category_variants ?? []}
+        dataIssues={data?.alerts?.data_issues}
+        loading={loading}
+      />
+    </div>
+  )
+}

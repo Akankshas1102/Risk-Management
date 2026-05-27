@@ -14,6 +14,7 @@ import type {
   BacktestPoint,
   RiskScoreItem,
   FreshnessResponse,
+  DiagnosticsResponse,
 } from '@/types/api'
 
 const q5m = { staleTime: 5 * 60_000, gcTime: 10 * 60_000 }
@@ -141,5 +142,13 @@ export function useFreshness() {
     queryFn: () => get<FreshnessResponse>('/api/admin/freshness'),
     staleTime: 60_000,
     refetchInterval: 2 * 60_000,
+  })
+}
+
+export function useDiagnostics() {
+  return useQuery({
+    queryKey: ['diagnostics'],
+    queryFn: () => get<DiagnosticsResponse>('/api/admin/diagnostics'),
+    staleTime: 60_000,
   })
 }

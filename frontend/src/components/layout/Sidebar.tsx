@@ -9,6 +9,7 @@ import {
   FileText,
   ChevronLeft,
   ShieldAlert,
+  Wrench,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -21,22 +22,25 @@ export type TabId =
   | 'recommendations'
   | 'ai-insights'
   | 'reports'
+  | 'data-health'
 
 interface NavItem {
   id: TabId
   label: string
   icon: React.ElementType
+  group?: 'main' | 'admin'
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { id: 'overview',            label: 'Overview',            icon: LayoutDashboard },
-  { id: 'risk-drivers',        label: 'Risk Drivers',        icon: TrendingUp },
-  { id: 'incident-breakdown',  label: 'Breakdown',           icon: BarChart2 },
-  { id: 'trends',              label: 'Trends',              icon: Activity },
-  { id: 'predictions',         label: 'Predictions',         icon: Cpu },
-  { id: 'recommendations',     label: 'Recommendations',     icon: ClipboardList },
-  { id: 'ai-insights',         label: 'AI Insights',         icon: Brain },
-  { id: 'reports',             label: 'Reports',             icon: FileText },
+  { id: 'overview',            label: 'Overview',            icon: LayoutDashboard, group: 'main' },
+  { id: 'risk-drivers',        label: 'Risk Drivers',        icon: TrendingUp,      group: 'main' },
+  { id: 'incident-breakdown',  label: 'Breakdown',           icon: BarChart2,       group: 'main' },
+  { id: 'trends',              label: 'Trends',              icon: Activity,        group: 'main' },
+  { id: 'predictions',         label: 'Predictions',         icon: Cpu,             group: 'main' },
+  { id: 'recommendations',     label: 'Recommendations',     icon: ClipboardList,   group: 'main' },
+  { id: 'ai-insights',         label: 'AI Insights',         icon: Brain,           group: 'main' },
+  { id: 'reports',             label: 'Reports',             icon: FileText,        group: 'main' },
+  { id: 'data-health',         label: 'Data & Model Health', icon: Wrench,          group: 'admin' },
 ]
 
 interface SidebarProps {
@@ -66,7 +70,7 @@ export function Sidebar({ activeTab, onTabChange, collapsed, onToggle }: Sidebar
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-4 space-y-0.5 px-2">
-        {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+        {NAV_ITEMS.filter((n) => n.group !== 'admin').map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => onTabChange(id)}
@@ -81,6 +85,30 @@ export function Sidebar({ activeTab, onTabChange, collapsed, onToggle }: Sidebar
             {!collapsed && <span className="truncate">{label}</span>}
           </button>
         ))}
+
+        {/* Admin section divider */}
+        <div className="mt-4 pt-3 border-t border-slate-800">
+          {!collapsed && (
+            <p className="px-3 mb-1 text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+              Admin
+            </p>
+          )}
+          {NAV_ITEMS.filter((n) => n.group === 'admin').map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => onTabChange(id)}
+              className={cn(
+                'w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                activeTab === id
+                  ? 'bg-slate-700 text-white'
+                  : 'text-slate-500 hover:bg-slate-800 hover:text-slate-200',
+              )}
+            >
+              <Icon className="h-4.5 w-4.5 shrink-0 h-[18px] w-[18px]" />
+              {!collapsed && <span className="truncate">{label}</span>}
+            </button>
+          ))}
+        </div>
       </nav>
 
       {/* Collapse toggle */}

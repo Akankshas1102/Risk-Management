@@ -23,9 +23,12 @@ from xgboost import XGBRegressor
 
 from app.ml.features import (
     _build_lag_features_from_series,
+    _build_quarterly_lag_features,
     build_bu_monthly_series,
+    build_bu_quarterly_series,
     build_lag_features,
     build_site_monthly_series,
+    build_site_quarterly_series,
     get_site_bu,
 )
 
@@ -46,20 +49,45 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 MIN_INCIDENTS = 50       # below this → BU-level fallback
-MIN_MONTHS = 12          # below this → BU-level fallback
-HOLDOUT_MONTHS = 3       # time-based holdout for evaluation
+MIN_MONTHS = 12          # legacy (kept for backtest module compatibility)
+MIN_QUARTERS = 4         # below this → BU-level fallback (quarterly path)
+HOLDOUT_MONTHS = 3       # legacy
+HOLDOUT_QUARTERS = 2     # last 2 quarters held out for evaluation
 _FEATURE_COLS = ["month_of_year", "quarter_num", "lag_1", "lag_3", "lag_6", "lag_12",
                  "rolling_3m", "rolling_6m"]
+_QUARTERLY_FEATURE_COLS = ["fiscal_q", "lag_1", "lag_2", "lag_4", "rolling_2q"]
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
 
 def _mape(actual: np.ndarray, predicted: np.ndarray) -> Optional[float]:
+    """Classic MAPE — kept for backward compatibility."""
     mask = actual > 0
     if not mask.any():
         return None
     return float(np.mean(np.abs((actual[mask] - predicted[mask]) / actual[mask])) * 100)
+
+
+def _smape(actual: np.ndarray, predicted: np.ndarray) -> Optional[float]:
+    """
+    Symmetric Mean Absolute Percentage Error (sMAPE).
+
+    Formula: mean( 2 * |actual - predicted| / (|actual| + |predicted|) ) * 100
+
+    Why we use this instead of MAPE:
+    - MAPE divides by actual only.  A month with actual=1 predicted=4 produces
+      300% error, which destroys the average for sparse sites.
+    - sMAPE divides by the SUM of magnitudes, so it's bounded at 200% per point
+      and treats over- and under-prediction symmetrically.
+
+    Returns None if every (actual+predicted) pair is zero (no signal at all).
+    """
+    denom = np.abs(actual) + np.abs(predicted)
+    mask = denom > 0
+    if not mask.any():
+        return None
+    return float(np.mean(2.0 * np.abs(actual[mask] - predicted[mask]) / denom[mask]) * 100)
 
 
 def _rmse(actual: np.ndarray, predicted: np.ndarray) -> float:
@@ -116,17 +144,32 @@ def _has_sufficient_data(series_df: pd.DataFrame) -> bool:
     return series_df["y"].sum() >= MIN_INCIDENTS and len(series_df) >= MIN_MONTHS
 
 
+def _confidence_band_q(series_df: pd.DataFrame) -> str:
+    """Quarterly version: 4 quarters = 1 year of history."""
+    n_q = len(series_df)
+    if n_q < MIN_QUARTERS:
+        return "low"
+    if n_q < 8:
+        return "medium"
+    return "high"
+
+
+def _has_sufficient_data_q(series_df: pd.DataFrame) -> bool:
+    return series_df["y"].sum() >= MIN_INCIDENTS and len(series_df) >= MIN_QUARTERS
+
+
 # ---------------------------------------------------------------------------
 # Prophet
 # ---------------------------------------------------------------------------
 
-def train_prophet(series_df: pd.DataFrame) -> dict:
+def train_prophet(series_df: pd.DataFrame, holdout_n: int = HOLDOUT_MONTHS) -> dict:
     """
-    Train Prophet on a [ds, y] monthly series.
+    Train Prophet on a [ds, y] series (monthly OR quarterly — caller chooses
+    holdout_n: 3 for monthly, 2 for quarterly).
 
-    Performs a time-based train/holdout split (last 3 months = holdout),
-    evaluates RMSE/MAPE on the holdout, then retrains on the FULL series
-    so the returned model is ready for future forecasting.
+    Performs a time-based train/holdout split, evaluates RMSE/sMAPE on the
+    holdout, then retrains on the FULL series so the returned model is ready
+    for future forecasting.
 
     Returns
     -------
@@ -135,11 +178,11 @@ def train_prophet(series_df: pd.DataFrame) -> dict:
     """
     if not _PROPHET_OK:
         return {"success": False, "error": "Prophet not installed"}
-    if len(series_df) < HOLDOUT_MONTHS + 4:
-        return {"success": False, "error": f"too few months: {len(series_df)}"}
+    if len(series_df) < holdout_n + 2:
+        return {"success": False, "error": f"too few rows: {len(series_df)}"}
 
     try:
-        train, holdout = _time_split(series_df)
+        train, holdout = _time_split(series_df, holdout_n=holdout_n)
 
         def _make_prophet():
             return Prophet(
@@ -151,14 +194,18 @@ def train_prophet(series_df: pd.DataFrame) -> dict:
             )
 
         # ── evaluation on holdout ──────────────────────────────────────────
+        # Detect monthly vs quarterly cadence from the spacing of ds values
+        median_gap_days = float((train["ds"].diff().dropna().dt.days).median() or 30)
+        freq = "QS-JAN" if median_gap_days >= 80 else "MS"
+
         m_eval = _make_prophet()
         m_eval.fit(train)
-        future_eval = m_eval.make_future_dataframe(periods=HOLDOUT_MONTHS, freq="MS")
-        fc_eval = m_eval.predict(future_eval).tail(HOLDOUT_MONTHS)
+        future_eval = m_eval.make_future_dataframe(periods=holdout_n, freq=freq)
+        fc_eval = m_eval.predict(future_eval).tail(holdout_n)
         preds_eval = np.clip(fc_eval["yhat"].values, 0, None)
 
         rmse = _rmse(holdout["y"].values, preds_eval)
-        mape = _mape(holdout["y"].values, preds_eval)
+        mape = _smape(holdout["y"].values, preds_eval)
 
         # ── full retrain for forecasting ───────────────────────────────────
         m_full = _make_prophet()
@@ -180,17 +227,27 @@ def train_prophet(series_df: pd.DataFrame) -> dict:
 # XGBoost
 # ---------------------------------------------------------------------------
 
-def train_xgboost(features_df: pd.DataFrame) -> dict:
+def train_xgboost(features_df: pd.DataFrame, holdout_n: int | None = None) -> dict:
     """
     Train XGBRegressor on a lag-feature DataFrame.
 
+    Auto-detects whether the feature columns are monthly (_FEATURE_COLS) or
+    quarterly (_QUARTERLY_FEATURE_COLS) and picks whichever set is present.
+
     Same time-based holdout evaluation + full retrain pattern as Prophet.
     """
-    avail_cols = [c for c in _FEATURE_COLS if c in features_df.columns]
-    if len(features_df) < HOLDOUT_MONTHS + 4:
+    # Detect feature schema (monthly vs quarterly)
+    monthly_avail   = [c for c in _FEATURE_COLS           if c in features_df.columns]
+    quarterly_avail = [c for c in _QUARTERLY_FEATURE_COLS if c in features_df.columns]
+    avail_cols = quarterly_avail if len(quarterly_avail) >= 3 else monthly_avail
+
+    if holdout_n is None:
+        holdout_n = HOLDOUT_QUARTERS if quarterly_avail else HOLDOUT_MONTHS
+
+    if len(features_df) < holdout_n + 2:
         return {"success": False, "error": f"too few rows after lag drop: {len(features_df)}"}
 
-    train, holdout = _time_split(features_df)
+    train, holdout = _time_split(features_df, holdout_n=holdout_n)
 
     def _make_xgb():
         return XGBRegressor(
@@ -312,6 +369,53 @@ def _xgb_ci(quarterly_pred: float, rmse: float, n_months: int = 3) -> tuple[floa
 
 
 # ---------------------------------------------------------------------------
+# Quarterly XGBoost recursive forecasting
+# ---------------------------------------------------------------------------
+
+def _quarter_start_to_fiscal(ds: pd.Timestamp) -> str:
+    """Map a fiscal-quarter START Timestamp to 'YYYY-Qn' (the same format
+    used everywhere else in the project)."""
+    return _month_to_fiscal_quarter(ds.year, ds.month)
+
+
+def _xgb_forecast_quarterly(result: dict, n_quarters: int) -> pd.DataFrame:
+    """
+    Recursively predict n quarters ahead using a fitted XGBoost model
+    that was trained on a quarterly lag-feature DataFrame.
+    Returns DataFrame [ds, yhat].
+    """
+    model = result["model"]
+    feature_cols = result["feature_cols"]
+    series = result["series"].copy()
+    y_history = list(series["y"].values.astype(float))
+    last_ds = series["ds"].max()
+
+    predictions = []
+    for _ in range(n_quarters):
+        next_ds = last_ds + pd.DateOffset(months=3)
+        n = len(y_history)
+
+        # fiscal_q: 1=Q4(Jan) 2=Q1(Apr) 3=Q2(Jul) 4=Q3(Oct)
+        fiscal_q = {1: 1, 4: 2, 7: 3, 10: 4}.get(next_ds.month, 1)
+
+        row = {
+            "fiscal_q": float(fiscal_q),
+            "lag_1": y_history[n - 1] if n >= 1 else 0.0,
+            "lag_2": y_history[n - 2] if n >= 2 else 0.0,
+            "lag_4": y_history[n - 4] if n >= 4 else 0.0,
+            "rolling_2q": float(np.mean(y_history[max(0, n - 2):n])) if n > 0 else 0.0,
+        }
+        X = pd.DataFrame([[row[c] for c in feature_cols]], columns=feature_cols)
+        pred = max(0.0, float(model.predict(X)[0]))
+
+        predictions.append({"ds": next_ds, "yhat": pred})
+        y_history.append(pred)
+        last_ds = next_ds
+
+    return pd.DataFrame(predictions)
+
+
+# ---------------------------------------------------------------------------
 # Main forecasting entry point
 # ---------------------------------------------------------------------------
 
@@ -321,9 +425,9 @@ def predict_next_n_quarters(
     session_factory=None,
 ) -> pd.DataFrame:
     """
-    Forecast the next n complete fiscal quarters for a site.
+    Forecast the next n complete fiscal quarters for a site (QUARTERLY pipeline).
 
-    - Sites with <50 incidents OR <12 months of history use a BU-level
+    - Sites with <50 incidents OR <4 quarters of history use a BU-level
       Prophet model scaled by the site's historical share of the BU.
     - If Prophet fails, falls back to XGBoost alone.
     - If XGBoost also fails, returns zero predictions (model_name='none').
@@ -333,13 +437,11 @@ def predict_next_n_quarters(
     DataFrame with columns: target_quarter, predicted_count, lower_ci, upper_ci,
                             model_name, confidence_band, training_data_through.
     """
-    n_forecast_months = n * 3
+    # Build the quarterly series for the site (partial current quarter excluded).
+    series_df = build_site_quarterly_series(site, session_factory)
 
-    series_df = build_site_monthly_series(site, session_factory)
-    lag_df = _build_lag_features_from_series(series_df) if not series_df.empty else pd.DataFrame()
-
-    is_sufficient = not series_df.empty and _has_sufficient_data(series_df)
-    band = _confidence_band(series_df)
+    is_sufficient = not series_df.empty and _has_sufficient_data_q(series_df)
+    band = _confidence_band_q(series_df)
 
     # ── select training series ────────────────────────────────────────────
     if is_sufficient:
@@ -349,13 +451,11 @@ def predict_next_n_quarters(
     else:
         # BU-level fallback: scale BU predictions by site's historical share
         bu = get_site_bu(site, session_factory)
-        bu_series = build_bu_monthly_series(bu, session_factory) if bu else series_df
+        bu_series = build_bu_quarterly_series(bu, session_factory) if bu else series_df
         train_series = bu_series if not bu_series.empty else series_df
         site_total = float(series_df["y"].sum()) if not series_df.empty else 1.0
         bu_total = float(bu_series["y"].sum()) if not bu_series.empty else 1.0
         scale_factor = (site_total / bu_total) if bu_total > 0 else 0.05
-        # Use the BU training series end as the anchor so sparse sites don't
-        # produce predictions for quarters that are already in the past.
         last_date = train_series["ds"].max() if not train_series.empty else (
             series_df["ds"].max() if not series_df.empty else pd.Timestamp.now()
         )
@@ -364,38 +464,55 @@ def predict_next_n_quarters(
     if train_series.empty or last_date is pd.NaT:
         return _zero_predictions(site, n, band)
 
-    target_quarters = _next_n_quarters_after(last_date, n)
-    training_through = _month_to_fiscal_quarter(last_date.year, last_date.month)
+    # Generate next-N target quarter labels and the "training through" quarter
+    target_quarters: list[str] = []
+    cursor = last_date
+    seen: set[str] = set()
+    while len(target_quarters) < n:
+        cursor = cursor + pd.DateOffset(months=3)
+        q = _quarter_start_to_fiscal(cursor)
+        if q not in seen:
+            target_quarters.append(q)
+            seen.add(q)
+    training_through = _quarter_start_to_fiscal(last_date)
 
-    # ── train models ─────────────────────────────────────────────────────
-    p_result = train_prophet(train_series)
-    xgb_features = _build_lag_features_from_series(train_series)
-    x_result = train_xgboost(xgb_features) if not xgb_features.empty else {"success": False}
+    # ── train models (both on quarterly series) ──────────────────────────
+    p_result = train_prophet(train_series, holdout_n=HOLDOUT_QUARTERS)
+    xgb_features = _build_quarterly_lag_features(train_series)
+    x_result = train_xgboost(xgb_features, holdout_n=HOLDOUT_QUARTERS) \
+        if not xgb_features.empty else {"success": False}
 
-    # ── generate monthly forecasts ────────────────────────────────────────
+    # Cap any forecast at 1.5× the historical max quarter (prevents wild spikes)
+    hist_max = float(train_series["y"].max()) if not train_series.empty else 0.0
+    cap = max(1.0, hist_max * 1.5)
+
     prophet_q: dict[str, dict] = {}
     xgb_q: dict[str, dict] = {}
 
     if p_result["success"]:
-        future = p_result["model"].make_future_dataframe(
-            periods=n_forecast_months, freq="MS"
-        )
-        fc = p_result["model"].predict(future).tail(n_forecast_months).copy()
-        fc["yhat"] = np.clip(fc["yhat"], 0, None)
-        fc["yhat_lower"] = np.clip(fc["yhat_lower"], 0, None)
-        fc["yhat_upper"] = np.clip(fc["yhat_upper"], 0, None)
-        # ds might be datetime[ns] — normalise
+        future = p_result["model"].make_future_dataframe(periods=n, freq="QS-JAN")
+        fc = p_result["model"].predict(future).tail(n).copy()
+        fc["yhat"]       = np.clip(fc["yhat"],       0, cap)
+        fc["yhat_lower"] = np.clip(fc["yhat_lower"], 0, cap)
+        fc["yhat_upper"] = np.clip(fc["yhat_upper"], 0, cap)
         fc["ds"] = pd.to_datetime(fc["ds"])
-        prophet_q = _aggregate_to_quarters(fc, target_quarters, "yhat_lower", "yhat_upper")
+        for _, r in fc.iterrows():
+            tq = _quarter_start_to_fiscal(r["ds"])
+            prophet_q[tq] = {
+                "yhat":  float(r["yhat"]),
+                "lower": float(r["yhat_lower"]),
+                "upper": float(r["yhat_upper"]),
+            }
 
     if x_result["success"]:
-        xgb_monthly = _xgb_forecast(x_result, n_forecast_months)
-        xgb_monthly["ds"] = pd.to_datetime(xgb_monthly["ds"])
-        # Add synthetic CI columns before aggregation
-        sigma_m = x_result["rmse"]
-        xgb_monthly["yhat_lower"] = (xgb_monthly["yhat"] - 1.65 * sigma_m).clip(lower=0)
-        xgb_monthly["yhat_upper"] = xgb_monthly["yhat"] + 1.65 * sigma_m
-        xgb_q = _aggregate_to_quarters(xgb_monthly, target_quarters, "yhat_lower", "yhat_upper")
+        xgb_fc = _xgb_forecast_quarterly(x_result, n)
+        sigma = x_result["rmse"]
+        for _, r in xgb_fc.iterrows():
+            tq = _quarter_start_to_fiscal(pd.Timestamp(r["ds"]))
+            yhat  = min(float(r["yhat"]), cap)
+            lower = max(0.0, yhat - 1.65 * sigma)
+            upper = min(cap, yhat + 1.65 * sigma)
+            xgb_q[tq] = {"yhat": yhat, "lower": lower, "upper": upper}
 
     # ── ensemble / select best ────────────────────────────────────────────
     rows = []
