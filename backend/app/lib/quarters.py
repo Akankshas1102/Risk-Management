@@ -2,25 +2,25 @@
 Fiscal-quarter labelling — the ONE place every other module gets quarter
 strings, sort keys, and conversions from.
 
-Convention used everywhere a quarter is *displayed* or *stored as a label*:
+Convention (CALENDAR-YEAR + fiscal-quarter letter — matches the raw CSV and
+every other module: analytics, forecaster, backtest, predictions, drivers):
 
-    Q1 = Apr-Jun  (start of fiscal year)
+    Q1 = Apr-Jun
     Q2 = Jul-Sep
     Q3 = Oct-Dec
-    Q4 = Jan-Mar  (end of fiscal year — wraps into next calendar year)
+    Q4 = Jan-Mar   (falls at the START of the calendar year)
 
-The label format is ``YYYY-Qn`` where YYYY is the fiscal-year **start** year.
-So January 2026 is part of fiscal year 2025-26 → label ``2025-Q4``.
-This makes labels read in true chronological order:
+The label format is ``YYYY-Qn`` where YYYY is the **calendar** year of the
+months in that quarter.  So January 2026 is labelled ``2026-Q4`` — exactly as
+the source CSV stores it (YEAR=2026, QUARTER='Q4').  No re-basing is done, so
+``risk_scores`` lines up with ``predictions_cache`` / ``backtest_results`` /
+the analytics endpoints, which all use this same calendar labelling.
 
-    2025-Q1 → 2025-Q2 → 2025-Q3 → 2025-Q4 → 2026-Q1
+Chronological order WITHIN a calendar year is:
 
-Note on the source CSV (``ol_incidents``):
-    The raw ``YEAR`` and ``QUARTER`` columns store the *calendar* year of
-    the month plus the fiscal quarter letter, so Jan 2026 has
-    ``YEAR=2026, QUARTER='Q4'``.  Those columns are NOT touched by this
-    helper — they stay exactly as the CSV provides them.  Every place that
-    needs a display label calls ``csv_to_label`` to convert.
+    Q4 (Jan-Mar) → Q1 (Apr-Jun) → Q2 (Jul-Sep) → Q3 (Oct-Dec)
+
+which ``sort_key`` reproduces (Q4 sorts first within a year).
 """
 
 from __future__ import annotations
@@ -35,8 +35,9 @@ import pandas as pd
 # Constants
 # ---------------------------------------------------------------------------
 
-# Fiscal-quarter ordinal — Q1 first, Q4 last in the fiscal year.
-_Q_ORDER = ["Q1", "Q2", "Q3", "Q4"]
+# Chronological order of fiscal quarters WITHIN one calendar year.
+# Q4 (Jan-Mar) is earliest, Q3 (Oct-Dec) is latest.
+_Q_CHRONO = ["Q4", "Q1", "Q2", "Q3"]
 
 # Calendar-month range printed alongside each fiscal quarter.
 _Q_MONTHS = {
@@ -46,8 +47,8 @@ _Q_MONTHS = {
     "Q4": ("Jan", "Mar"),
 }
 
-# First calendar month of each fiscal quarter (used to compute Timestamps).
-_Q_START_MONTH = {"Q1": 4, "Q2": 7, "Q3": 10, "Q4": 1}
+# First calendar month of each fiscal quarter (within the same calendar year).
+_Q_START_MONTH = {"Q4": 1, "Q1": 4, "Q2": 7, "Q3": 10}
 
 
 # ---------------------------------------------------------------------------
@@ -56,11 +57,11 @@ _Q_START_MONTH = {"Q1": 4, "Q2": 7, "Q3": 10, "Q4": 1}
 
 def fiscal_year_for(year: int, month: int) -> int:
     """
-    Return the FISCAL-YEAR-START year for a (calendar year, month) pair.
+    FISCAL-YEAR-START year for a (calendar year, month) pair.
 
-    Apr 2025 → 2025  (FY 2025-26 starts in Apr 2025)
-    Jan 2026 → 2025  (still inside FY 2025-26)
-    Apr 2026 → 2026  (FY 2026-27 starts)
+    Informational only — labels in this module use the CALENDAR year, not this.
+    Apr 2025 → 2025, Jan 2026 → 2025.  Kept for callers that genuinely need the
+    Apr-Mar fiscal-year grouping.
     """
     return year if month >= 4 else year - 1
 
@@ -78,16 +79,14 @@ def fiscal_quarter_letter(month: int) -> str:
 
 def from_year_month(year: int, month: int) -> str:
     """
-    Build the canonical ``YYYY-Qn`` label for a (calendar year, month) pair.
+    Canonical ``YYYY-Qn`` label for a (calendar year, month) pair, using the
+    CALENDAR year (matches the CSV + analytics + forecaster).
 
-    Uses fiscal-year-start convention everywhere:
         Apr 2025 → '2025-Q1'
-        Jan 2026 → '2025-Q4'
+        Jan 2026 → '2026-Q4'
         Apr 2026 → '2026-Q1'
     """
-    fy = fiscal_year_for(year, month)
-    q = fiscal_quarter_letter(month)
-    return f"{fy}-{q}"
+    return f"{year}-{fiscal_quarter_letter(month)}"
 
 
 def from_timestamp(ts: pd.Timestamp) -> str:
@@ -97,19 +96,16 @@ def from_timestamp(ts: pd.Timestamp) -> str:
 
 def csv_to_label(year_csv: int, quarter_csv: str) -> str:
     """
-    Convert the *raw CSV columns* (YEAR + QUARTER) to the canonical label.
+    Convert the raw CSV columns (YEAR + QUARTER) to the canonical label.
 
-    The CSV stores YEAR as the calendar year of the row's OCCUREDDATE plus
-    QUARTER as 'Q1' | 'Q2' | 'Q3' | 'Q4' (already fiscal).  For Q4 the CSV
-    keeps the calendar year of Jan/Feb/Mar — meaning Jan 2026 has
-    YEAR=2026, QUARTER='Q4', which under the fiscal-year-start convention
-    must be re-labelled as '2025-Q4'.
+    The CSV already stores the calendar year plus the fiscal-quarter letter
+    (Jan 2026 → YEAR=2026, QUARTER='Q4'), which IS the canonical label here —
+    so this is a direct join with NO re-basing.
+
+        csv_to_label(2026, 'Q4') → '2026-Q4'
+        csv_to_label(2025, 'Q1') → '2025-Q1'
     """
-    year_csv = int(year_csv)
-    if quarter_csv == "Q4":
-        # CSV's Jan-Mar Q4 ⇒ fiscal year started in the previous calendar year
-        return f"{year_csv - 1}-Q4"
-    return f"{year_csv}-{quarter_csv}"
+    return f"{int(year_csv)}-{quarter_csv}"
 
 
 # ---------------------------------------------------------------------------
@@ -120,39 +116,36 @@ def sort_key(label: str) -> int:
     """
     Comparable integer for canonical labels.  Larger = later in time.
 
-    '2025-Q1' → 20251
-    '2025-Q4' → 20254   (Jan-Mar 2026)
-    '2026-Q1' → 20261
+        '2026-Q4' → 20260   (Jan-Mar 2026)
+        '2026-Q1' → 20261   (Apr-Jun 2026)
+        '2026-Q2' → 20262
+        '2026-Q3' → 20263   (Oct-Dec 2026)
+        '2027-Q4' → 20270   (Jan-Mar 2027)
     """
-    fy_str, q = label.split("-")
-    return int(fy_str) * 10 + (_Q_ORDER.index(q) + 1)
+    year_str, q = label.split("-")
+    return int(year_str) * 10 + _Q_CHRONO.index(q)
 
 
 def quarter_start_timestamp(label: str) -> pd.Timestamp:
-    """First day of the fiscal quarter as a pandas Timestamp."""
-    fy_str, q = label.split("-")
-    fy = int(fy_str)
-    start_month = _Q_START_MONTH[q]
-    cal_year = fy + 1 if q == "Q4" else fy
-    return pd.Timestamp(year=cal_year, month=start_month, day=1)
+    """First day of the fiscal quarter as a pandas Timestamp (calendar year)."""
+    year_str, q = label.split("-")
+    return pd.Timestamp(year=int(year_str), month=_Q_START_MONTH[q], day=1)
 
 
 def calendar_months_label(label: str) -> str:
     """
-    Return a human-friendly calendar range for a fiscal label.
+    Human-friendly calendar range for a label.
 
-    '2025-Q4' → 'Jan-Mar 2026'
-    '2025-Q1' → 'Apr-Jun 2025'
+        '2026-Q4' → 'Jan-Mar 2026'
+        '2025-Q1' → 'Apr-Jun 2025'
     """
-    fy_str, q = label.split("-")
-    fy = int(fy_str)
-    cal_year = fy + 1 if q == "Q4" else fy
+    year_str, q = label.split("-")
     m_start, m_end = _Q_MONTHS[q]
-    return f"{m_start}-{m_end} {cal_year}"
+    return f"{m_start}-{m_end} {year_str}"
 
 
 def with_calendar(label: str) -> str:
-    """Return ``'2025-Q4 (Jan-Mar 2026)'`` style string."""
+    """Return ``'2026-Q4 (Jan-Mar 2026)'`` style string."""
     return f"{label} ({calendar_months_label(label)})"
 
 
@@ -167,13 +160,20 @@ def current_label(today: Optional[date] = None) -> str:
 
 
 def previous_label(label: str) -> str:
-    """Step one fiscal quarter back."""
-    fy_str, q = label.split("-")
-    fy = int(fy_str)
-    idx = _Q_ORDER.index(q)
-    if idx == 0:
-        return f"{fy - 1}-Q4"
-    return f"{fy}-{_Q_ORDER[idx - 1]}"
+    """
+    Step one fiscal quarter back, chronologically.
+
+        '2026-Q4' → '2025-Q3'   (Jan-Mar 2026 ← Oct-Dec 2025)
+        '2026-Q1' → '2026-Q4'
+        '2026-Q2' → '2026-Q1'
+        '2026-Q3' → '2026-Q2'
+    """
+    year_str, q = label.split("-")
+    year = int(year_str)
+    idx = _Q_CHRONO.index(q)
+    if idx == 0:           # Q4 → previous calendar year's Q3
+        return f"{year - 1}-Q3"
+    return f"{year}-{_Q_CHRONO[idx - 1]}"
 
 
 # ---------------------------------------------------------------------------

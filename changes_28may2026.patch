@@ -1,0 +1,166 @@
+diff --git a/backend/app/api/analytics.py b/backend/app/api/analytics.py
+index f8471f2..a79cdb7 100644
+--- a/backend/app/api/analytics.py
++++ b/backend/app/api/analytics.py
+@@ -135,20 +135,33 @@ def _risk_band(score: float) -> str:
+ 
+ @router.get("/sites", response_model=list[SiteItem])
+ def list_sites(
+-    quarter: Optional[str] = Query(None, description="YYYY-Qn, defaults to latest complete"),
++    quarter: Optional[str] = Query(None, description="Accepted for compatibility; no longer filters the list"),
+     business_unit: Optional[str] = Query(None),
+     db: Session = Depends(get_ssms_db),
+ ):
+-    """All sites with their BU and incident count for the given (or latest complete) quarter."""
+-    year_s, q_s = _resolve_quarter(quarter, db)
+-    cache_key = f"sites:{year_s}:{q_s}:{business_unit}"
++    """
++    All distinct sites present in ol_incidents (since 2020), with their BU and
++    total incident count.
++
++    NOTE: This intentionally does NOT filter by quarter.  Sites that were
++    inactive in the latest quarter still have predictions / drivers / risk
++    scores computed, so they must remain selectable in the UI.  `incident_count`
++    is therefore the site's total incident count since 2020 (not a single
++    quarter).  The `quarter` query param is kept for API compatibility but is
++    ignored for the site list.
++    """
++    cache_key = f"sites:all:{business_unit}"
+     hit, val = _cache_get(cache_key)
+     if hit:
+         return val
+ 
++    conds = [OLIncident.YEAR >= "2020", OLIncident.SINAME.isnot(None)]
++    if business_unit:
++        conds.append(OLIncident.BUNAME == business_unit)
++
+     stmt = (
+         select(OLIncident.SINAME, OLIncident.BUNAME, func.count().label("incident_count"))
+-        .where(*_base_filter(year_s, q_s, business_unit))
++        .where(*conds)
+         .group_by(OLIncident.SINAME, OLIncident.BUNAME)
+         .order_by(func.count().desc())
+     )
+diff --git a/backend/app/ml/drivers.py b/backend/app/ml/drivers.py
+index 211ccd0..298947a 100644
+--- a/backend/app/ml/drivers.py
++++ b/backend/app/ml/drivers.py
+@@ -55,7 +55,10 @@ def _load_quarterly_cat_raw(site: str, session_factory=None) -> pd.DataFrame:
+             select(
+                 OLIncident.YEAR,
+                 OLIncident.QUARTER,
+-                OLIncident.INCIDENTCATNAME,
++                # Use CATEGORY_GROUP (12 balanced groups) as the pivot column so
++                # SHAP attribution has clean, learnable features. Aliased to the
++                # legacy name so the downstream pivot code is unchanged.
++                OLIncident.CATEGORY_GROUP,
+             )
+             .where(
+                 OLIncident.SINAME == site,
+@@ -80,7 +83,9 @@ def _load_monthly_cat_raw(site: str, session_factory=None) -> pd.DataFrame:
+             select(
+                 OLIncident.YEAR,
+                 OLIncident.MONTH,
+-                OLIncident.INCIDENTCATNAME,
++                # Match the pivot: sparklines are keyed by CATEGORY_GROUP so they
++                # line up with the SHAP driver names shown in the UI.
++                OLIncident.CATEGORY_GROUP,
+             )
+             .where(
+                 OLIncident.SINAME == site,
+diff --git a/backend/app/models/ol_incidents.py b/backend/app/models/ol_incidents.py
+index 54e6fcb..d6cc4d5 100644
+--- a/backend/app/models/ol_incidents.py
++++ b/backend/app/models/ol_incidents.py
+@@ -32,6 +32,9 @@ class OLIncident(Base):
+ 
+     INCIDENTTYPENAME = Column("incidenttypename", String)
+     INCIDENTCATNAME  = Column("incidentcatname",  String)
++    # Learnable grouping of INCIDENTCATNAME into 12 canonical categories
++    # (added with the properly-cleaned CSV). Nullable for backward-compat.
++    CATEGORY_GROUP   = Column("category_group",   String)
+     INCIDENTTITLE    = Column("incidenttitle",    String)
+     INCIDENTDETAILS  = Column("incidentdetails",  String)
+ 
+diff --git a/backend/app/services/pipeline_steps.py b/backend/app/services/pipeline_steps.py
+index 22cdaf7..e7f70de 100644
+--- a/backend/app/services/pipeline_steps.py
++++ b/backend/app/services/pipeline_steps.py
+@@ -76,7 +76,10 @@ def step_risk_scores(sf=None) -> dict:
+                 OLIncident.QUARTER.label("quarter"),
+                 OLIncident.YEAR.label("year"),
+                 OLIncident.LEVELNAME.label("severity"),
+-                OLIncident.INCIDENTCATNAME.label("incident_category"),
++                # Diversity index now uses CATEGORY_GROUP (12 balanced groups)
++                # instead of INCIDENTCATNAME (41 imbalanced categories) so the
++                # Shannon entropy signal is more meaningful.
++                OLIncident.CATEGORY_GROUP.label("incident_category"),
+             )
+             .where(
+                 OLIncident.YEAR >= "2020",
+diff --git a/backend/app/services/recommendations.py b/backend/app/services/recommendations.py
+index 30411d8..3aa2ec7 100644
+--- a/backend/app/services/recommendations.py
++++ b/backend/app/services/recommendations.py
+@@ -74,8 +74,8 @@ def _driver_name(d: Optional[dict]) -> str:
+ # ---------------------------------------------------------------------------
+ 
+ def rule_access_control(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
+-    """Access Control trend up by >20% → physical security review."""
+-    d = _find_driver(drivers, "access control")
++    """Access & Intrusion trend up by >20% → physical security review."""
++    d = _find_driver(drivers, "access")   # matches CATEGORY_GROUP "Access & Intrusion"
+     if d and d.get("trend") == "up" and (d.get("pct_change_vs_last_qtr") or 0) > 20:
+         return RecommendationSpec(
+             action_text="Enhance access control and conduct CCTV coverage review",
+@@ -88,8 +88,8 @@ def rule_access_control(drivers: list[dict], site_data: dict) -> Optional[Recomm
+ 
+ 
+ def rule_ir_worker(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
+-    """IR/Worker driver with high impact → labour engagement programme."""
+-    d = _find_driver(drivers, "ir", "worker") or _find_driver(drivers, "agitation")
++    """Industrial Relations driver with high impact → labour engagement programme."""
++    d = _find_driver(drivers, "industrial")   # matches CATEGORY_GROUP "Industrial Relations"
+     if d and (d.get("impact_score") or 0) > 70:
+         return RecommendationSpec(
+             action_text="Initiate community/labour engagement programme",
+@@ -135,12 +135,8 @@ def rule_reporting_lag(drivers: list[dict], site_data: dict) -> Optional[Recomme
+ 
+ def rule_process_deviations(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
+     """SOP / LSR / Process-deviation driver trending up → refresher training."""
+-    d = (
+-        _find_driver(drivers, "sop")
+-        or _find_driver(drivers, "lsr")
+-        or _find_driver(drivers, "deviation")
+-        or _find_driver(drivers, "procedure")
+-    )
++    # CATEGORY_GROUP "Safety & SOP Violation" — match on "sop" or "safety".
++    d = _find_driver(drivers, "sop") or _find_driver(drivers, "safety")
+     if d and d.get("trend") == "up":
+         return RecommendationSpec(
+             action_text="Schedule SOP/LSR refresher training and update procedure notices",
+diff --git a/scripts/load_csv_to_db.py b/scripts/load_csv_to_db.py
+index 301b8d8..28a6cd2 100644
+--- a/scripts/load_csv_to_db.py
++++ b/scripts/load_csv_to_db.py
+@@ -48,11 +48,15 @@ import app.models.backtest     # noqa: F401 — registers BacktestResult
+ import app.models.ingestion    # noqa: F401 — registers IngestionRun
+ 
+ # ── CSV path ──────────────────────────────────────────────────────────────────
+-# Prefer the cleaned CSV produced by scripts/clean_csv.py.
+-# Falls back to the raw export if the cleaned file isn't present.
+-_CLEAN_PATH = REPO_ROOT / "data" / "raw" / "OL_INCIDENTS_clean.csv"
+-_RAW_PATH   = REPO_ROOT / "data" / "raw" / "OL_INCIDENTS_20260518_142042.csv"
+-CSV_PATH    = _CLEAN_PATH if _CLEAN_PATH.exists() else _RAW_PATH
++# Preference order (first existing file wins):
++#   1. OL_INCIDENTS_properly_cleaned.csv — encoding fixed, severity normalised,
++#      and includes the CATEGORY_GROUP column (12 learnable groups).
++#   2. OL_INCIDENTS_clean.csv            — earlier cleanup pass (no CATEGORY_GROUP).
++#   3. OL_INCIDENTS_20260518_142042.csv  — raw export.
++_PROPER_PATH = REPO_ROOT / "data" / "raw" / "OL_INCIDENTS_properly_cleaned.csv"
++_CLEAN_PATH  = REPO_ROOT / "data" / "raw" / "OL_INCIDENTS_clean.csv"
++_RAW_PATH    = REPO_ROOT / "data" / "raw" / "OL_INCIDENTS_20260518_142042.csv"
++CSV_PATH = next(p for p in (_PROPER_PATH, _CLEAN_PATH, _RAW_PATH) if p.exists())
+ 
+ 
+ def _derive_quarter(month: int) -> str:

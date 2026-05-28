@@ -159,11 +159,13 @@ def compute_site_backtest(
     List of dicts ready for BacktestResult(**row) insertion.
     The `month` field carries a fiscal-quarter string like '2025-Q4'.
     """
-    series = build_site_quarterly_series(site)
+    # pad=False: hold out the site's REAL last quarters, not zero-padding that
+    # would otherwise be appended out to the global data end.
+    series = build_site_quarterly_series(site, pad=False)
     bu_name = bu or get_site_bu(site)
 
     if series.empty or len(series) < MIN_QUARTERS + n_quarters:
-        bu_series = build_bu_quarterly_series(bu_name) if bu_name else pd.DataFrame()
+        bu_series = build_bu_quarterly_series(bu_name, pad=False) if bu_name else pd.DataFrame()
         if bu_series.empty or len(bu_series) < MIN_QUARTERS + n_quarters:
             log.info("Skipping %s: insufficient data for %d-quarter backtest", site, n_quarters)
             return []

@@ -373,19 +373,29 @@ def _build_quarterly_lag_features(
     return df.dropna().reset_index(drop=True)
 
 
-def build_site_quarterly_series(site: str, session_factory=None) -> pd.DataFrame:
+def build_site_quarterly_series(site: str, session_factory=None, pad: bool = True) -> pd.DataFrame:
     """
-    [ds, y] quarterly series for a site.  Missing quarters filled with 0.
-    Zero-padded to the global OL_INCIDENTS data end.
-    The currently-open (partial) quarter is EXCLUDED.
+    [ds, y] quarterly series for a site.  Internal gaps filled with 0, and the
+    currently-open (partial) quarter is always EXCLUDED.
+
+    pad=True  (default) — trailing-pad with zero quarters out to the global
+        OL_INCIDENTS data end.  Use for FORECASTING so prediction quarters
+        anchor to the current quarter (sparse sites don't predict the past).
+
+    pad=False — stop at the site's own last real quarter (no trailing zeros).
+        Use for BACKTEST / holdout evaluation so the held-out window is the
+        site's actual last quarters of data, not padding.
     """
     raw = _load_raw(site=site, session_factory=session_factory)
-    pad_to = get_global_max_date(session_factory)
+    pad_to = get_global_max_date(session_factory) if pad else None
     return _df_to_quarterly_series(raw, pad_to=pad_to, exclude_partial=True)
 
 
-def build_bu_quarterly_series(business_unit: str, session_factory=None) -> pd.DataFrame:
-    """[ds, y] quarterly series for a whole BU (all sites aggregated)."""
+def build_bu_quarterly_series(business_unit: str, session_factory=None, pad: bool = True) -> pd.DataFrame:
+    """
+    [ds, y] quarterly series for a whole BU (all sites aggregated).
+    See build_site_quarterly_series for the meaning of `pad`.
+    """
     raw = _load_raw(business_unit=business_unit, session_factory=session_factory)
-    pad_to = get_global_max_date(session_factory)
+    pad_to = get_global_max_date(session_factory) if pad else None
     return _df_to_quarterly_series(raw, pad_to=pad_to, exclude_partial=True)

@@ -188,7 +188,10 @@ def get_site_detail(site: str, db: Session) -> dict[str, Any]:
     last_incident  = range_row.last_d  if range_row else None
 
     # ── 2. Per-quarter time series (excluding partial current quarter) --
-    series = build_site_quarterly_series(site)
+    # pad=False so the displayed series + train/holdout windows reflect the
+    # site's REAL quarters (matching what the backtest actually held out),
+    # not zero-padding appended out to the global data end.
+    series = build_site_quarterly_series(site, pad=False)
     quarterly_series: list[dict] = []
     for _, row in series.iterrows():
         ds = row["ds"]
