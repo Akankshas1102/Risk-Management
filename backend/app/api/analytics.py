@@ -136,20 +136,29 @@ def _risk_band(score: float) -> str:
 
 @router.get("/sites", response_model=list[SiteItem])
 def list_sites(
-    quarter: Optional[str] = Query(None, description="YYYY-Qn, defaults to latest complete"),
+    quarter: Optional[str] = Query(None, description="Accepted for compatibility; no longer filters the list"),
     business_unit: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    """All sites with their BU and incident count for the given (or latest complete) quarter."""
-    year_s, q_s = _resolve_quarter(quarter, db)
-    cache_key = f"sites:{year_s}:{q_s}:{business_unit}"
+    """
+    All distinct sites in ol_incidents (since 2020) with their BU and TOTAL
+    incident count.  Not filtered by quarter — sites inactive in the latest
+    quarter still have predictions/drivers/risk scores, so they must stay
+    selectable.  `incident_count` is the site's total since 2020; the `quarter`
+    param is accepted for API compatibility but ignored.
+    """
+    cache_key = f"sites:all:{business_unit}"
     hit, val = _cache_get(cache_key)
     if hit:
         return val
 
+    conds = [OLIncident.YEAR >= "2020", OLIncident.SINAME.isnot(None)]
+    if business_unit:
+        conds.append(OLIncident.BUNAME == business_unit)
+
     stmt = (
         select(OLIncident.SINAME, OLIncident.BUNAME, func.count().label("incident_count"))
-        .where(*_base_filter(year_s, q_s, business_unit))
+        .where(*conds)
         .group_by(OLIncident.SINAME, OLIncident.BUNAME)
         .order_by(func.count().desc())
     )

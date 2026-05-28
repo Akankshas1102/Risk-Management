@@ -30,11 +30,19 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import shap
-from sqlalchemy import select
+from sqlalchemy import literal_column, select
 from xgboost import XGBRegressor
 
 from app.core.database import SessionLocal
 from app.models.ol_incidents import OLIncident
+
+# Driver attribution groups incidents by CATEGORY_GROUP (12 clean, balanced
+# groups) instead of the raw INCIDENTCATNAME (41 sparse categories) so SHAP has
+# stronger signal.  The OLIncident ORM model does not declare this column, so we
+# reference the DB column directly via literal_column.  The resulting DataFrame
+# keeps the legacy column name "INCIDENTCATNAME" so all downstream pivot /
+# sparkline logic is unchanged — only the *values* are now group names.
+_CATEGORY_GROUP_COL = literal_column("category_group")
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -55,7 +63,7 @@ def _load_quarterly_cat_raw(site: str, session_factory=None) -> pd.DataFrame:
             select(
                 OLIncident.YEAR,
                 OLIncident.QUARTER,
-                OLIncident.INCIDENTCATNAME,
+                _CATEGORY_GROUP_COL,
             )
             .where(
                 OLIncident.SINAME == site,
@@ -80,7 +88,7 @@ def _load_monthly_cat_raw(site: str, session_factory=None) -> pd.DataFrame:
             select(
                 OLIncident.YEAR,
                 OLIncident.MONTH,
-                OLIncident.INCIDENTCATNAME,
+                _CATEGORY_GROUP_COL,
             )
             .where(
                 OLIncident.SINAME == site,

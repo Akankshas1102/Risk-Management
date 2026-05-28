@@ -40,12 +40,22 @@ interface ChartPoint {
   isToday?: boolean
 }
 
+// Backtest rows are labelled by fiscal quarter (e.g. "2026-Q4"), but the
+// historic chart points are keyed by month ("2026-01").  Convert a quarter
+// label to its FIRST calendar month so the keys align.
+// Fiscal convention (lib/quarters.py): Q1=Apr, Q2=Jul, Q3=Oct, Q4=Jan.
+function quarterToFirstMonthKey(quarter: string): string {
+  const [year, q] = quarter.split('-')
+  const startMonth: Record<string, string> = { Q1: '04', Q2: '07', Q3: '10', Q4: '01' }
+  return `${year}-${startMonth[q] ?? '01'}`
+}
+
 function buildChartData(
   trend: TrendPoint[],
   backtest: BacktestPoint[],
   predictions: PredictionItem[],
 ): ChartPoint[] {
-  const btMap = new Map(backtest.map((b) => [b.month, b.predicted]))
+  const btMap = new Map(backtest.map((b) => [quarterToFirstMonthKey(b.month), b.predicted]))
 
   // Last 12 months of actuals
   const historic: ChartPoint[] = trend.slice(-12).map((t) => {

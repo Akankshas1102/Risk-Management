@@ -59,6 +59,19 @@ def _find_driver(drivers: list[dict], *keywords: str) -> Optional[dict]:
     return None
 
 
+def _find_exact(drivers: list[dict], name: str) -> Optional[dict]:
+    """
+    Return the first driver whose name EXACTLY equals `name` (case-insensitive).
+    Used for short ambiguous category codes like 'IR' where a substring match
+    would wrongly hit 'Fire' etc.
+    """
+    target = name.strip().lower()
+    for d in drivers:
+        if (d.get("driver_name", "") or "").strip().lower() == target:
+            return d
+    return None
+
+
 def _top_driver(drivers: list[dict]) -> Optional[dict]:
     """The driver with the highest impact_score."""
     return max(drivers, key=lambda d: d.get("impact_score", 0)) if drivers else None
@@ -73,10 +86,28 @@ def _driver_name(d: Optional[dict]) -> str:
 # Individual rules (each is a self-contained function)
 # ---------------------------------------------------------------------------
 
+def rule_high_velocity(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
+    """Any driver with QoQ change > 20% — rapid escalation flag."""
+    sharp = [d for d in drivers if (d.get("pct_change_vs_last_qtr") or 0) > 20]
+    if not sharp:
+        return None
+    worst = max(sharp, key=lambda d: d.get("pct_change_vs_last_qtr", 0))
+    return RecommendationSpec(
+        action_text=(
+            f"Investigate rapid rise in '{worst['driver_name']}' incidents "
+            f"({worst.get('pct_change_vs_last_qtr', 0):.0f}% QoQ) — trigger root-cause analysis"
+        ),
+        priority="high",
+        impact_estimate="Rapid escalation; early intervention can prevent repeat incidents",
+        suggested_owner="Site EHS Manager",
+        driver_link=_driver_name(worst),
+    )
+
+
 def rule_access_control(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
-    """Access Control trend up by >20% → physical security review."""
-    d = _find_driver(drivers, "access control")
-    if d and d.get("trend") == "up" and (d.get("pct_change_vs_last_qtr") or 0) > 20:
+    """Access & Intrusion driver with notable impact → physical security review."""
+    d = _find_driver(drivers, "access")   # matches CATEGORY_GROUP "Access & Intrusion"
+    if d and (d.get("impact_score") or 0) > 15:
         return RecommendationSpec(
             action_text="Enhance access control and conduct CCTV coverage review",
             priority="high",
@@ -87,10 +118,32 @@ def rule_access_control(drivers: list[dict], site_data: dict) -> Optional[Recomm
     return None
 
 
+def rule_material_handling(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
+    """Material driver with notable impact → safe-handling refresher."""
+    d = _find_driver(drivers, "material")   # matches CATEGORY_GROUP "Material"
+    if d and (d.get("impact_score") or 0) > 15:
+        return RecommendationSpec(
+            action_text="Audit material handling procedures and schedule safe-handling refresher",
+            priority="high" if (d.get("impact_score") or 0) >= 60 else "medium",
+            impact_estimate="Material incidents are high-impact; 20-30% reduction possible with controls",
+            suggested_owner="Operations & EHS Manager",
+            driver_link=_driver_name(d),
+        )
+    return None
+
+
 def rule_ir_worker(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
-    """IR/Worker driver with high impact → labour engagement programme."""
-    d = _find_driver(drivers, "ir", "worker") or _find_driver(drivers, "agitation")
-    if d and (d.get("impact_score") or 0) > 70:
+    """Industrial Relations driver with notable impact → labour engagement programme."""
+    # Matches the CATEGORY_GROUP "Industrial Relations" AND the raw categories
+    # "IR" / "IR - Worker/ Union/ Transporters".  ('ir' alone is avoided — it
+    # would substring-match 'Fire'; we use exact 'IR' + worker/union instead.)
+    d = (
+        _find_driver(drivers, "industrial")
+        or _find_driver(drivers, "worker")
+        or _find_driver(drivers, "union")
+        or _find_exact(drivers, "IR")
+    )
+    if d and (d.get("impact_score") or 0) > 15:
         return RecommendationSpec(
             action_text="Initiate community/labour engagement programme",
             priority="medium",
@@ -101,20 +154,78 @@ def rule_ir_worker(drivers: list[dict], site_data: dict) -> Optional[Recommendat
     return None
 
 
-def rule_asset_property(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
-    """Asset/Property is top driver AND total incidents rising QoQ."""
-    top = _top_driver(drivers)
-    if (
-        top
-        and _cat_match(top.get("driver_name", ""), "asset")
-        and (site_data.get("delta_qtr_pct") or 0) > 0
-    ):
+def rule_community_pr(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
+    """Community & PR driver with notable impact → community engagement programme."""
+    # Matches CATEGORY_GROUP "Community & PR" AND raw categories
+    # "PR - Villagers/ Neighborhood" / "Agitation by community and workers".
+    d = (
+        _find_driver(drivers, "community")
+        or _find_driver(drivers, "villagers")
+        or _find_driver(drivers, "neighbo")
+    )
+    if d and (d.get("impact_score") or 0) > 20:
         return RecommendationSpec(
-            action_text="Increase night patrol rotation and asset-tagging coverage",
+            action_text=(
+                "Initiate community engagement programme — schedule quarterly dialogues "
+                "with village leaders and address top grievances from incident records"
+            ),
+            priority="medium",
+            impact_estimate="Could reduce community/PR incidents 15-25% over 2 quarters",
+            suggested_owner="Site HSE Head",
+            driver_link=_driver_name(d),
+        )
+    return None
+
+
+def rule_asset_property(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
+    """Asset & Property is top driver OR has notable impact → asset security audit."""
+    d = _find_driver(drivers, "asset")   # matches CATEGORY_GROUP "Asset & Property"
+    top = _top_driver(drivers)
+    is_top = top is not None and _cat_match(top.get("driver_name", ""), "asset")
+    if d and (is_top or (d.get("impact_score") or 0) > 25):
+        return RecommendationSpec(
+            action_text=(
+                "Conduct full asset security audit — review perimeter fencing, CCTV "
+                "coverage, and access logs for the affected zones"
+            ),
             priority="high",
             impact_estimate="Could reduce asset/property incidents 15-20%",
             suggested_owner="Site Security Manager",
-            driver_link=_driver_name(top),
+            driver_link=_driver_name(d),
+        )
+    return None
+
+
+def rule_traffic_transit(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
+    """Traffic & Transit driver with notable impact → vehicle movement review."""
+    d = _find_driver(drivers, "traffic")   # matches CATEGORY_GROUP "Traffic & Transit"
+    if d and (d.get("impact_score") or 0) > 20:
+        return RecommendationSpec(
+            action_text=(
+                "Review vehicle movement protocols — enforce speed limits, update gate "
+                "entry registers, and increase spot checks on contractor vehicles"
+            ),
+            priority="medium",
+            impact_estimate="Could reduce traffic/transit incidents 15-20%",
+            suggested_owner="Operations Manager",
+            driver_link=_driver_name(d),
+        )
+    return None
+
+
+def rule_safety_sop(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
+    """Safety & SOP Violation driver with notable impact → mandatory SOP refresher."""
+    d = _find_driver(drivers, "sop") or _find_driver(drivers, "safety")
+    if d and (d.get("impact_score") or 0) > 20:
+        return RecommendationSpec(
+            action_text=(
+                "Schedule mandatory SOP refresher training for all site personnel — focus "
+                "on the top-violated procedures identified in recent incident reports"
+            ),
+            priority="high",
+            impact_estimate="Could reduce SOP-violation incidents 10-20%",
+            suggested_owner="Site HSE Head",
+            driver_link=_driver_name(d),
         )
     return None
 
@@ -134,13 +245,8 @@ def rule_reporting_lag(drivers: list[dict], site_data: dict) -> Optional[Recomme
 
 
 def rule_process_deviations(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
-    """SOP / LSR / Process-deviation driver trending up → refresher training."""
-    d = (
-        _find_driver(drivers, "sop")
-        or _find_driver(drivers, "lsr")
-        or _find_driver(drivers, "deviation")
-        or _find_driver(drivers, "procedure")
-    )
+    """Safety & SOP Violation driver trending UP → refresher training & notices."""
+    d = _find_driver(drivers, "sop") or _find_driver(drivers, "safety")
     if d and d.get("trend") == "up":
         return RecommendationSpec(
             action_text="Schedule SOP/LSR refresher training and update procedure notices",
@@ -152,47 +258,19 @@ def rule_process_deviations(drivers: list[dict], site_data: dict) -> Optional[Re
     return None
 
 
-def rule_high_velocity(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
-    """Any driver with pct_change > 50% in a single quarter — rapid escalation flag."""
-    sharp = [d for d in drivers if (d.get("pct_change_vs_last_qtr") or 0) > 50]
-    if not sharp:
-        return None
-    worst = max(sharp, key=lambda d: d.get("pct_change_vs_last_qtr", 0))
-    return RecommendationSpec(
-        action_text=(
-            f"Investigate rapid rise in '{worst['driver_name']}' incidents "
-            f"({worst.get('pct_change_vs_last_qtr', 0):.0f}% QoQ) — trigger root-cause analysis"
-        ),
-        priority="high",
-        impact_estimate="Rapid escalation; early intervention can prevent repeat incidents",
-        suggested_owner="Site EHS Manager",
-        driver_link=_driver_name(worst),
-    )
-
-
-def rule_material_handling(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
-    """Material / spillage driver with impact > 60 → safe-handling refresher."""
-    d = _find_driver(drivers, "material")
-    if d and (d.get("impact_score") or 0) > 60:
-        return RecommendationSpec(
-            action_text="Audit material handling procedures and schedule safe-handling refresher",
-            priority="high" if (d.get("impact_score") or 0) >= 80 else "medium",
-            impact_estimate="Material incidents are highest-impact; 20-30% reduction possible with controls",
-            suggested_owner="Operations & EHS Manager",
-            driver_link=_driver_name(d),
-        )
-    return None
-
-
 def rule_generic_fallback(drivers: list[dict], site_data: dict) -> Optional[RecommendationSpec]:
-    """Always fires: review and address the top driver."""
+    """Always fires: structured root-cause action for the top driver."""
     top = _top_driver(drivers)
     if not top:
         return None
     score = top.get("impact_score", 0)
-    priority = "high" if score >= 60 else ("medium" if score >= 30 else "low")
+    priority = "high" if score > 70 else ("medium" if score >= 40 else "low")
     return RecommendationSpec(
-        action_text=f"Review and address root causes of '{top['driver_name']}' incidents",
+        action_text=(
+            f"Investigate recurring '{top['driver_name']}' incidents this quarter — "
+            f"assign a root-cause analysis owner, document findings, and present "
+            f"corrective actions at the next site safety review meeting"
+        ),
         priority=priority,
         impact_estimate=f"Top driver accounts for {score:.0f}/100 of predicted risk",
         suggested_owner="Site EHS Manager",
@@ -201,18 +279,21 @@ def rule_generic_fallback(drivers: list[dict], site_data: dict) -> Optional[Reco
 
 
 # ---------------------------------------------------------------------------
-# Rule registry — add new rules here; order matters for priority resolution.
+# Rule registry — add new rules here; order matters for dedup precedence.
 # rule_generic_fallback must remain last (it always fires as a safety net).
 # ---------------------------------------------------------------------------
 
 RULES: list[RuleFn] = [
-    rule_high_velocity,          # rapid QoQ spike → immediate flag
-    rule_access_control,         # access control up >20%
-    rule_material_handling,      # material incidents high impact
-    rule_ir_worker,              # labour / community relations
-    rule_asset_property,         # asset theft / property top driver + rising
+    rule_high_velocity,          # any driver QoQ > 20%
+    rule_access_control,         # Access & Intrusion impact > 15
+    rule_material_handling,      # Material impact > 15
+    rule_ir_worker,              # Industrial Relations impact > 15
+    rule_community_pr,           # Community & PR impact > 20
+    rule_asset_property,         # Asset & Property top driver or impact > 25
+    rule_traffic_transit,        # Traffic & Transit impact > 20
+    rule_safety_sop,             # Safety & SOP Violation impact > 20
     rule_reporting_lag,          # p90 lag > 30 days
-    rule_process_deviations,     # SOP/LSR trending up
+    rule_process_deviations,     # Safety & SOP Violation trending up
     rule_generic_fallback,       # always last
 ]
 
