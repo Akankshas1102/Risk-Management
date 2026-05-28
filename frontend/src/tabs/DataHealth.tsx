@@ -11,6 +11,8 @@ import {
 } from 'lucide-react'
 import { useDiagnostics } from '@/api/hooks'
 import { KpiCard } from '@/components/common/KpiCard'
+import { InfoTooltip } from '@/components/common/InfoTooltip'
+import { SiteDetailDrawer } from '@/components/common/SiteDetailDrawer'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
@@ -148,11 +150,13 @@ function SiteHealthTable({
   loading,
   query,
   filter,
+  onSelectSite,
 }: {
   sites: DiagnosticsSite[]
   loading: boolean
   query: string
   filter: string
+  onSelectSite: (site: string) => void
 }) {
   if (loading) {
     return (
@@ -194,11 +198,39 @@ function SiteHealthTable({
             <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400">
               <th className="px-4 py-2.5 text-left">Site</th>
               <th className="px-4 py-2.5 text-left">BU</th>
-              <th className="px-4 py-2.5 text-right">Incidents</th>
-              <th className="px-4 py-2.5 text-right">Months</th>
-              <th className="px-4 py-2.5 text-left">Champion</th>
-              <th className="px-4 py-2.5 text-right">Holdout MAPE</th>
-              <th className="px-4 py-2.5 text-right">Backtest ±20%</th>
+              <th className="px-4 py-2.5 text-right">
+                Incidents
+                <InfoTooltip>Total incident rows attributed to this site in `ol_incidents`.</InfoTooltip>
+              </th>
+              <th className="px-4 py-2.5 text-right">
+                Months
+                <InfoTooltip>How many distinct (year, month) buckets this site has data in.</InfoTooltip>
+              </th>
+              <th className="px-4 py-2.5 text-left">
+                Champion
+                <InfoTooltip width="w-80">
+                  The model picked for this site (lowest holdout error). Either
+                  Prophet, XGBoost, an ensemble of the two, or `bu_prophet` when
+                  the site is too sparse and we trained on its business unit.
+                </InfoTooltip>
+              </th>
+              <th className="px-4 py-2.5 text-right">
+                MAPE
+                <InfoTooltip width="w-80">
+                  <b>Mean Absolute Percentage Error</b> on the held-out quarters.
+                  Smaller is better. 8% means the typical prediction was 8% away
+                  from what actually happened.
+                </InfoTooltip>
+              </th>
+              <th className="px-4 py-2.5 text-right">
+                Accuracy (±20%)
+                <InfoTooltip width="w-96">
+                  % of held-out quarters where the prediction was within 20% of
+                  the actual count. This is the headline accuracy number.
+                  100% = the model nailed every test quarter; 50% = it was close
+                  half the time. Click the row for the worked example.
+                </InfoTooltip>
+              </th>
               <th className="px-4 py-2.5 text-left">Status</th>
             </tr>
           </thead>
@@ -211,7 +243,12 @@ function SiteHealthTable({
               </tr>
             ) : (
               filtered.map((s) => (
-                <tr key={s.site} className="border-b border-slate-50 hover:bg-slate-50">
+                <tr
+                  key={s.site}
+                  onClick={() => onSelectSite(s.site)}
+                  className="border-b border-slate-50 hover:bg-brand-50 cursor-pointer"
+                  title="Click for full details"
+                >
                   <td className="px-4 py-2.5 font-medium text-slate-700 max-w-[180px]">
                     <span className="truncate block" title={s.site}>{s.site}</span>
                   </td>
@@ -371,10 +408,12 @@ export function DataHealth() {
   const diag = useDiagnostics()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
+  const [selectedSite, setSelectedSite] = useState<string | null>(null)
 
   const data = diag.data
   const loading = diag.isPending
   const summary = data?.summary
+  const accuracy = data?.accuracy
 
   const statusFilters = [
     { value: 'all',                   label: 'All' },
@@ -435,7 +474,30 @@ export function DataHealth() {
       />
 
       {/* ── Summary KPI row ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <KpiCard
+          title="System Accuracy"
+          value={
+            accuracy?.weighted_pct_within_20 != null
+              ? `${accuracy.weighted_pct_within_20.toFixed(0)}%`
+              : '—'
+          }
+          subtitle={
+            accuracy?.sites_evaluated != null
+              ? `across ${accuracy.sites_evaluated} sites (±20%)`
+              : 'within ±20%'
+          }
+          accentColor={
+            accuracy?.weighted_pct_within_20 == null
+              ? 'border-l-slate-300'
+              : accuracy.weighted_pct_within_20 >= 75
+              ? 'border-l-green-500'
+              : accuracy.weighted_pct_within_20 >= 50
+              ? 'border-l-blue-500'
+              : 'border-l-orange-500'
+          }
+          loading={loading}
+        />
         <KpiCard
           title="Total Sites"
           value={summary?.total_sites ?? 0}
@@ -445,14 +507,14 @@ export function DataHealth() {
         <KpiCard
           title="Healthy"
           value={summary?.healthy ?? 0}
-          subtitle="backtest ≥ 75%"
+          subtitle="accuracy ≥ 75%"
           accentColor="border-l-green-500"
           loading={loading}
         />
         <KpiCard
           title="Sparse / BU Fallback"
           value={summary?.sparse_bu_fallback ?? 0}
-          subtitle="< 50 incidents or < 12 months"
+          subtitle="< 50 incidents or < 4 quarters"
           accentColor="border-l-amber-400"
           loading={loading}
         />
@@ -500,6 +562,7 @@ export function DataHealth() {
         loading={loading}
         query={query}
         filter={filter}
+        onSelectSite={setSelectedSite}
       />
 
       {/* ── Alerts ───────────────────────────────────────────────────── */}
@@ -508,6 +571,12 @@ export function DataHealth() {
         categoryVariants={data?.alerts?.category_variants ?? []}
         dataIssues={data?.alerts?.data_issues}
         loading={loading}
+      />
+
+      {/* ── Site detail drawer ──────────────────────────────────────── */}
+      <SiteDetailDrawer
+        site={selectedSite}
+        onClose={() => setSelectedSite(null)}
       />
     </div>
   )

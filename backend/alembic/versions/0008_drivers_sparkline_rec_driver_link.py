@@ -4,8 +4,8 @@ Revision ID: 0008
 Revises: 0007
 Create Date: 2026-05-24
 
-Apply with:  python scripts/apply_ssms_migrations.py
-(or apply the ALTER TABLE statements directly — already applied via pyodbc in this session)
+Apply with:  python scripts/apply_migrations.py
+(ALTER TABLE statements were originally applied via pyodbc against SQL Server.)
 """
 
 from typing import Sequence, Union

@@ -18,7 +18,7 @@ Tables created
 Usage
 -----
     cd backend
-    python ../scripts/apply_ssms_migrations.py
+    python ../scripts/apply_migrations.py
 
 Note: ol_incidents is created by load_csv_to_db.py, not here, because that
 script drops and recreates the table on each CSV reload.

@@ -15,6 +15,7 @@ import type {
   RiskScoreItem,
   FreshnessResponse,
   DiagnosticsResponse,
+  SiteDetailResponse,
 } from '@/types/api'
 
 const q5m = { staleTime: 5 * 60_000, gcTime: 10 * 60_000 }
@@ -149,6 +150,16 @@ export function useDiagnostics() {
   return useQuery({
     queryKey: ['diagnostics'],
     queryFn: () => get<DiagnosticsResponse>('/api/admin/diagnostics'),
+    staleTime: 60_000,
+  })
+}
+
+export function useSiteDetail(site?: string) {
+  return useQuery({
+    queryKey: ['site-detail', site],
+    queryFn: () =>
+      get<SiteDetailResponse>(`/api/admin/site-detail/${encodeURIComponent(site!)}`),
+    enabled: !!site,
     staleTime: 60_000,
   })
 }

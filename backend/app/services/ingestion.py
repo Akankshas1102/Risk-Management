@@ -3,13 +3,11 @@ CSV ingestion pipeline.
 
 Entry point: ingest_csv(file_path, source, on_success) -> dict
 
-Validates and summarises the CSV then writes a run record to SQL Server
-(ingestion_runs via IngestionRun).  The raw incident rows are NOT written
-to a relational table — OL_INCIDENTS is the authoritative incident store and is
-populated externally.
-
-Phase 2C (2026-05-25): Postgres incident writes (incidents_raw, incidents_clean,
-incidents_quarantine) were removed when the Postgres stack was retired.
+Validates and summarises the CSV then writes a run record to the
+PostgreSQL ``ingestion_runs`` table (via the IngestionRun ORM model).
+The raw incident rows are NOT written here — ``ol_incidents`` is the
+authoritative incident store and is populated by
+``scripts/load_csv_to_db.py``.
 """
 
 import uuid
@@ -36,7 +34,7 @@ def ingest_csv(
 ) -> dict:
     """
     Load a CSV file through the ingestion pipeline and persist a run record
-    to SQL Server.
+    to PostgreSQL.
 
     Parameters
     ----------
@@ -59,17 +57,17 @@ def ingest_csv(
     filename = Path(file_path).name
 
     # ── 1. Open the run record ────────────────────────────────────────────────
-    with SessionLocal() as ssms:
-        ssms.add(
+    with SessionLocal() as session:
+        session.add(
             IngestionRun(
                 batch_id=str(batch_id),
                 source=source,
                 filename=filename,
                 status="running",
-                started_at=started_at.replace(tzinfo=None),  # SQL Server: no tz
+                started_at=started_at.replace(tzinfo=None),  # store as naive datetime
             )
         )
-        ssms.commit()
+        session.commit()
 
     try:
         df_raw = pd.read_csv(file_path)
@@ -81,8 +79,8 @@ def ingest_csv(
 
         # ── 2. Mark run as success ───────────────────────────────────────────
         finished_at = datetime.now(timezone.utc)
-        with SessionLocal() as ssms:
-            run = ssms.execute(
+        with SessionLocal() as session:
+            run = session.execute(
                 select(IngestionRun).where(IngestionRun.batch_id == str(batch_id))
             ).scalar_one()
             run.rows_received = rows_received
@@ -90,21 +88,21 @@ def ingest_csv(
             run.rows_quarantined = rows_quarantined
             run.status = "success"
             run.finished_at = finished_at.replace(tzinfo=None)
-            ssms.commit()
+            session.commit()
 
         # ── 3. Fire post-ingest hook (e.g. background pipeline run) ─────────
         if on_success is not None:
             on_success()
 
     except Exception as exc:
-        with SessionLocal() as ssms:
-            run = ssms.execute(
+        with SessionLocal() as session:
+            run = session.execute(
                 select(IngestionRun).where(IngestionRun.batch_id == str(batch_id))
             ).scalar_one()
             run.status = "failed"
             run.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
             run.error_message = str(exc)
-            ssms.commit()
+            session.commit()
         raise
 
     return {

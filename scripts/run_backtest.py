@@ -55,11 +55,11 @@ def main() -> None:
 
     site_pairs = None
     if args.sites:
-        # Build pairs from the requested sites (resolve BU from OL_INCIDENTS)
+        # Build pairs from the requested sites (resolve BU from ol_incidents)
         from sqlalchemy import select
-        from app.core.ssms import SSMSSession
+        from app.core.database import SessionLocal
         from app.models.ol_incidents import OLIncident
-        with SSMSSession() as s:
+        with SessionLocal() as s:
             rows = s.execute(
                 select(OLIncident.SINAME, OLIncident.BUNAME)
                 .where(

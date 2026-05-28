@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.ssms import get_ssms_db
+from app.core.database import get_db
 from app.models.predictions import ModelRun, PredictionsCache
 from app.models.backtest import BacktestResult
 import app.models.backtest  # noqa — ensures table is registered
@@ -64,7 +64,7 @@ def _build_model_meta(site: str, db: Session) -> ModelMeta:
 def get_predictions(
     site: Optional[str] = Query(None, description="Filter by site name"),
     business_unit: Optional[str] = Query(None),
-    db: Session = Depends(get_ssms_db),
+    db: Session = Depends(get_db),
 ):
     """
     Return cached predictions + champion model metadata.
@@ -93,7 +93,7 @@ def get_predictions(
 @router.get("/predictions/backtest", response_model=list[BacktestPoint])
 def get_backtest(
     site: str = Query(..., description="Site name"),
-    db: Session = Depends(get_ssms_db),
+    db: Session = Depends(get_db),
 ):
     """
     Return the last 6 months of (actual, predicted) pairs for the champion model.

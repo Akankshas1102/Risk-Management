@@ -323,10 +323,10 @@ story.append(section_header("6.  Key Constraints & Design Decisions", ORANGE))
 story.append(Spacer(1, 3*mm))
 story.append(kv_table([
     ("OL_INCIDENTS",         "Read-only. Never written by this app. External Vedanta EHS system is the only writer."),
-    ("Sole database",        "SQL Server vedanta. Postgres stack was retired 2026-05-25."),
-    ("api/ + schemas/",      "Vinay's territory — API files and Pydantic schemas are not modified by the ML team."),
+    ("Sole database",        "PostgreSQL vedanta_risk (managed via pgAdmin). The corporate SQL Server is only the export origin."),
+    ("api/ + schemas/",      "FastAPI routers and Pydantic schemas — the HTTP contract for the React frontend."),
     ("Fiscal quarters",      "Q4 = Jan–Mar · Q1 = Apr–Jun · Q2 = Jul–Sep · Q3 = Oct–Dec"),
-    ("Site normalisation",   "OL_INCIDENTS has mixed-case site names. All normalised to UPPER STRIP before scoring."),
+    ("Site normalisation",   "ol_incidents has mixed-case site names. All normalised to UPPER STRIP before scoring."),
     ("Sparse-site fallback", "Sites with <50 incidents or <12 months of data fall back to BU-level Prophet scaled by historical share."),
 ], col1=52*mm))
 story.append(Spacer(1, 6*mm))

@@ -4,7 +4,7 @@ Revision ID: 0006
 Revises: 0005
 Create Date: 2026-05-20
 
-Apply with:  python scripts/apply_ssms_migrations.py
+Apply with:  python scripts/apply_migrations.py
 """
 
 from typing import Sequence, Union

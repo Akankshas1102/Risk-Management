@@ -1,11 +1,11 @@
-"""Create ingestion_runs table in SQL Server (mirrors Postgres ingestion_runs)
+"""Create ingestion_runs table in PostgreSQL
 
 Revision ID: 0009
 Revises: 0008
 Create Date: 2026-05-25
 
-Apply with:  python scripts/apply_ssms_migrations.py
-(The table is created by SSMSBase.metadata.create_all — no raw SQL needed here.)
+Apply with:  python scripts/apply_migrations.py
+(The table is created by Base.metadata.create_all — no raw SQL needed here.)
 """
 
 from typing import Sequence, Union
@@ -17,8 +17,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Table is created via SSMSBase.metadata.create_all(checkfirst=True)
-    # in scripts/apply_ssms_migrations.py — no explicit DDL needed here.
+    # Table is created via Base.metadata.create_all(checkfirst=True)
+    # in scripts/apply_migrations.py — no explicit DDL needed here.
     pass
 
 

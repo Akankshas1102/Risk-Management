@@ -56,7 +56,7 @@ Both columns were backfilled for all existing rows on migration. New script runs
 |---|---|
 | `backend/app/ml/backtest.py` | Reusable backtest module: `compute_site_backtest()`, `run_all_backtests()`, `compute_abs_pct_error()` |
 | `scripts/run_backtest.py` | CLI wrapper around `run_all_backtests()` — replaces the old `compute_backtest.py` for new runs |
-| `backend/app/services/model_meta.py` | Service layer for Vinay's API — call `get_model_meta(site, db)`, `get_backtest_summary(site, db)`, `get_backtest_rows(site, db)` |
+| `backend/app/services/model_meta.py` | Service layer for the predictions API — call `get_model_meta(site, db)`, `get_backtest_summary(site, db)`, `get_backtest_rows(site, db)` |
 | `backend/alembic/versions/0007_add_backtest_ape_and_model_history.py` | Alembic migration DDL for the two new columns |
 
 ### Bug Fixed (2026-05-23) — BU Series Anchor for Inactive BUs
@@ -78,14 +78,15 @@ Both columns were backfilled for all existing rows on migration. New script runs
 | `recommendations` | 41 | 37 sites |
 | `backtest_results` | 216 | 36 sites × 6 months (VLCTPP skipped: insufficient data); all rows have abs_pct_error |
 
-### Vinay's API Integration Note
+### Predictions API integration note
 
-**Do not call** `backend/app/api/predictions.py` directly from ML scripts. Instead use the service layer:
+**Do not call** `backend/app/api/predictions.py` directly from ML scripts.
+Instead use the service layer:
 
 ```python
 from app.services.model_meta import get_model_meta, get_backtest_summary, get_backtest_rows
 
-with SSMSSession() as db:
+with SessionLocal() as db:
     meta    = get_model_meta("BALCO", db)        # ModelMetaDict
     summary = get_backtest_summary("BALCO", db)  # BacktestSummaryDict
     rows    = get_backtest_rows("BALCO", db)     # list[BacktestRowDict]
@@ -133,7 +134,7 @@ risk_scores → forecasters → backtest → drivers
 - **Next run visible**: `GET /health` returns `{"status": "ok", "next_scheduled_retrain": "..."}`
 - **Misfire grace**: 1 hour; `coalesce=True` (one run even if multiple missed)
 
-### Service functions (Vinay's API calls these)
+### Service functions (admin API uses these)
 
 ```python
 from app.services.orchestrator import (
@@ -204,7 +205,7 @@ last_ingest_at          : None   ← OL_INCIDENTS populated externally; no CSV u
 
 ### New Service — `backend/app/services/drivers_service.py`
 
-**Vinay's API calls these functions:**
+**Admin API uses these functions:**
 
 ```python
 from app.services.drivers_service import regenerate_for_site, regenerate_all

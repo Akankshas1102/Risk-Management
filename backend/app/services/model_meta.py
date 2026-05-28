@@ -1,8 +1,8 @@
 """
 model_meta service — shared logic for champion model metadata.
 
-Called by Vinay's API layer (backend/app/api/predictions.py) to retrieve
-per-site model information without duplicating DB query logic.
+Called by the predictions API layer (backend/app/api/predictions.py) to
+retrieve per-site model information without duplicating DB query logic.
 
 Public API
 ----------
@@ -35,7 +35,7 @@ from app.models.predictions import ModelRun
 
 
 # ---------------------------------------------------------------------------
-# TypedDicts (contract between this service and Vinay's API layer)
+# TypedDicts (contract between this service and the predictions API layer)
 # ---------------------------------------------------------------------------
 
 class ModelMetaDict(TypedDict, total=False):

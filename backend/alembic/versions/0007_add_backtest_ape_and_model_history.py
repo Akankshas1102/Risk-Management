@@ -4,8 +4,7 @@ Revision ID: 0007
 Revises: 0006
 Create Date: 2026-05-23
 
-Apply with:  python scripts/apply_ssms_migrations.py
-(or run the upgrade() body directly via pyodbc if alembic is not wired to SQL Server)
+Apply with:  python scripts/apply_migrations.py
 """
 
 from typing import Sequence, Union

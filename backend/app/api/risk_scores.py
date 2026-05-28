@@ -5,7 +5,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.risk_score import RiskScore
+from app.models.pipeline import RiskScore
 from app.schemas.risk_score import RiskScoreResponse
 
 router = APIRouter(prefix="/api", tags=["risk-scores"])

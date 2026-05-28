@@ -10,6 +10,21 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+"""
+Standalone SQL Server → CSV/XLSX exporter.
+
+This is a small, *separate* FastAPI app whose only job is to read rows from
+the corporate SQL Server `dbo.OL_INCIDENTS` table and write them to
+`exports/` as CSV or XLSX.  It is **not** part of the live ML pipeline.
+
+The live application reads cleaned CSVs from `data/raw/` and serves them via
+the PostgreSQL-backed FastAPI app at `backend/app/main.py`.  Use this script
+only when you need a fresh export from SQL Server — for example to refresh
+`data/raw/OL_INCIDENTS_<timestamp>.csv` before re-running `clean_csv.py`.
+
+Configure connection details via the optional DB_* variables in `.env`.
+"""
+
 _ILLEGAL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
 
 load_dotenv()

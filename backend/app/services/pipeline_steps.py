@@ -24,6 +24,7 @@ import pandas as pd
 from sqlalchemy import func, select, text
 
 from app.core.database import SessionLocal
+from app.lib import quarters as Q
 from app.ml.drivers import compute_drivers_for_site
 from app.ml.forecaster import predict_next_n_quarters
 from app.models.drivers import Recommendation, RiskDriver
@@ -55,19 +56,19 @@ def _to_builtin(value):
 
 
 # ---------------------------------------------------------------------------
-# Step 1 — Risk scores (SQL Server OL_INCIDENTS → risk_scores table)
+# Step 1 — Risk scores (ol_incidents → risk_scores table)
 # ---------------------------------------------------------------------------
 
 def step_risk_scores(sf=None) -> dict:
     """
-    Compute composite risk scores from OL_INCIDENTS and persist to SQL Server
+    Compute composite risk scores from ol_incidents and persist to the
     risk_scores table.  Uses _DEFAULT_WEIGHTS (0.35/0.30/0.20/0.15).
     """
     sf = sf or SessionLocal
 
-    # Load incidents as a scoring DataFrame — RTRIM/LTRIM site names so SQL Server's
-    # collation (which ignores trailing spaces in UNIQUE constraints) and pandas see
-    # the same canonical string for each site.
+    # Load incidents as a scoring DataFrame — RTRIM/LTRIM site names so the
+    # collation (which ignores trailing spaces in UNIQUE constraints) and
+    # pandas see the same canonical string for each site.
     with sf() as session:
         rows = session.execute(
             select(
@@ -93,13 +94,22 @@ def step_risk_scores(sf=None) -> dict:
         rows,
         columns=["site_name", "buname", "quarter", "year", "severity", "incident_category"],
     )
-    # Normalise site names: OL_INCIDENTS has mixed-case entries ("RAM Agucha" and
-    # "RAM AGUCHA").  SQL Server's default CI collation treats them as equal for
-    # UNIQUE constraints; we must apply the same normalisation in Python.
+    # Normalise site names: ol_incidents has mixed-case entries ("RAM Agucha" and
+    # "RAM AGUCHA").  Postgres' default case-sensitive collation treats them as
+    # different rows; we normalise in Python so the UNIQUE (site, quarter)
+    # constraint sees one canonical site.
     df["site_name"] = df["site_name"].str.upper().str.strip()
     df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
     df["severity"] = df["severity"].str.lower().fillna("low")
-    df["quarter_str"] = df["year"].astype(str) + "-" + df["quarter"]
+    # Build canonical fiscal label using the (year, quarter) columns from the CSV.
+    # Q.csv_to_label re-bases Jan-Mar 'Q4' rows to the previous fiscal-year start
+    # so chronological sorting works (e.g. CSV YEAR=2026 QUARTER='Q4' → '2025-Q4').
+    df["quarter_str"] = df.apply(
+        lambda r: Q.csv_to_label(int(r["year"]), r["quarter"])
+                  if pd.notna(r["year"]) and isinstance(r["quarter"], str)
+                  else None,
+        axis=1,
+    )
 
     current_q = _current_quarter_str()
     available = sorted(
@@ -321,7 +331,7 @@ def _get_site_context(site: str, sf) -> dict:
     )
     return {
         "site": site,
-        "quarter": f"{row.year}-{row.quarter}",
+        "quarter": Q.csv_to_label(int(row.year), row.quarter),
         "total_incidents_qtr": row.total,
         "delta_qtr_pct": delta,
         "reporting_lag_p90": float(np.percentile(lags, 90)) if lags else None,

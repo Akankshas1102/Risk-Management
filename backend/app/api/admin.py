@@ -15,11 +15,12 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.core.ssms import get_ssms_db
+from app.core.database import get_db
 from app.core.scheduler import next_run_time
 from app.models.pipeline import PipelineRun
 from app.models.predictions import PredictionsCache
 from app.services.orchestrator import create_queued_run, run_full_pipeline
+from app.services.site_health import get_site_detail, system_accuracy
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -29,7 +30,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 # ---------------------------------------------------------------------------
 
 @router.post("/retrain")
-async def retrain(background_tasks: BackgroundTasks, db: Session = Depends(get_ssms_db)):
+async def retrain(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Trigger a full pipeline run (risk scores → forecasters → drivers).
     Returns immediately with the pipeline_run_id; check /api/admin/runs for status.
@@ -44,7 +45,7 @@ async def retrain(background_tasks: BackgroundTasks, db: Session = Depends(get_s
 # ---------------------------------------------------------------------------
 
 @router.get("/runs")
-def list_runs(db: Session = Depends(get_ssms_db)):
+def list_runs(db: Session = Depends(get_db)):
     """Return the last 20 pipeline runs with per-step outcomes."""
     rows = db.execute(
         select(PipelineRun)
@@ -71,7 +72,7 @@ def list_runs(db: Session = Depends(get_ssms_db)):
 # ---------------------------------------------------------------------------
 
 @router.get("/freshness")
-def data_freshness(db: Session = Depends(get_ssms_db)):
+def data_freshness(db: Session = Depends(get_db)):
     """
     Snapshot of data currency across the pipeline.
 
@@ -148,7 +149,7 @@ def _derive_status(
 
 
 @router.get("/diagnostics")
-def diagnostics(db: Session = Depends(get_ssms_db)):
+def diagnostics(db: Session = Depends(get_db)):
     """
     One-shot health snapshot powering the Data Health tab:
       - pipeline.last_run     : trigger, status, duration, per-step results
@@ -374,6 +375,7 @@ def diagnostics(db: Session = Depends(get_ssms_db)):
             "insufficient_data": insufficient,
             "low_accuracy": low_acc,
         },
+        "accuracy": system_accuracy(db),
         "sites": sites,
         "alerts": {
             "site_variants": site_variants,
@@ -381,3 +383,23 @@ def diagnostics(db: Session = Depends(get_ssms_db)):
             "data_issues": data_issues,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /api/admin/site-detail/{site}
+# ---------------------------------------------------------------------------
+
+@router.get("/site-detail/{site}")
+def site_detail(site: str, db: Session = Depends(get_db)):
+    """
+    Per-site explainable health snapshot.
+
+    Powers the Data Health tab's "Site Detail" drawer.  Every value is
+    derived live from the database — change the CSV, reload, and the
+    response changes accordingly.
+
+    Returns
+    -------
+    Self-describing dict; see frontend `SiteDetailResponse` for the shape.
+    """
+    return get_site_detail(site, db)

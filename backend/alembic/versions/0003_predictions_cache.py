@@ -4,9 +4,9 @@ Revision ID: 0003
 Revises: 0002
 Create Date: 2026-05-19
 
-NOTE: This migration uses raw SQL Server DDL (IF NOT EXISTS guards).
-Apply against vedanta via:
-    python scripts/apply_ssms_migrations.py
+NOTE: This migration was originally written for SQL Server (IF NOT EXISTS guards).
+The active deployment is PostgreSQL — apply via:
+    python scripts/apply_migrations.py
 """
 
 from typing import Sequence, Union

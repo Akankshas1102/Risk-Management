@@ -12,8 +12,8 @@ run_full_pipeline(trigger)
     the others.  Full tracebacks are captured and stored in
     pipeline_runs.steps_run JSON.
 
-Service functions for Vinay's admin API
------------------------------------------
+Service functions for the admin API
+-----------------------------------
 trigger_manual_retrain(background_tasks=None) -> dict
     Queue a manual run (status="queued") and start it asynchronously.
     Returns {run_id, status}.
@@ -201,7 +201,7 @@ def create_queued_run(trigger: str, session_factory=None) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Service functions — call these from Vinay's API
+# Service functions — call these from the admin API
 # ---------------------------------------------------------------------------
 
 def trigger_manual_retrain(background_tasks=None) -> dict:
@@ -218,8 +218,8 @@ def trigger_manual_retrain(background_tasks=None) -> dict:
     -------
     dict: ``{"run_id": <int>, "status": "queued"}``
 
-    Example (Vinay's endpoint)
-    --------------------------
+    Example (admin endpoint)
+    ------------------------
     ::
 
         @router.post("/admin/retrain")
@@ -257,8 +257,8 @@ def get_recent_runs(limit: int = 10, session_factory=None) -> list[dict]:
         id, trigger, status, started_at, finished_at,
         total_duration_s, steps, error_summary.
 
-    Example (Vinay's endpoint)
-    --------------------------
+    Example (admin endpoint)
+    ------------------------
     ::
 
         @router.get("/admin/runs")
@@ -297,9 +297,8 @@ def get_freshness(session_factory=None) -> dict:
     """
     Single snapshot of data currency across the whole pipeline.
 
-    Queries both databases:
-    - SQL Server (vedanta): pipeline_runs, OL_INCIDENTS, predictions_cache
-    - Postgres: ingestion_runs (for last CSV upload timestamp)
+    All queries hit the same PostgreSQL database (vedanta_risk):
+    pipeline_runs, ol_incidents, predictions_cache, ingestion_runs.
 
     Returns
     -------
@@ -307,13 +306,13 @@ def get_freshness(session_factory=None) -> dict:
         last_ingest_at          (str ISO-8601 | None)  — last successful CSV upload
         last_pipeline_run_at    (str ISO-8601 | None)  — last finished pipeline run
         pipeline_run_status     (str | None)           — its status
-        latest_incident_date    (str | None)           — MAX(OCCUREDDATE) in OL_INCIDENTS
+        latest_incident_date    (str | None)           — MAX(OCCUREDDATE) in ol_incidents
         latest_predicted_quarter (str | None)          — most recently trained prediction target
         n_sites_with_predictions (int)                 — distinct sites in predictions_cache
-        sites_missing_predictions (list[str])          — sites in OL_INCIDENTS with no predictions
+        sites_missing_predictions (list[str])          — sites in ol_incidents with no predictions
 
-    Example (Vinay's endpoint)
-    --------------------------
+    Example (admin endpoint)
+    ------------------------
     ::
 
         @router.get("/admin/freshness")
@@ -323,7 +322,7 @@ def get_freshness(session_factory=None) -> dict:
     sf = session_factory or SessionLocal
     result: dict[str, Any] = {}
 
-    # ── SQL Server queries ────────────────────────────────────────────────
+    # ── Database queries ──────────────────────────────────────────────────
     with sf() as session:
         # Last finished pipeline run
         run_row = session.execute(
@@ -388,13 +387,13 @@ def get_freshness(session_factory=None) -> dict:
     result["n_sites_with_predictions"] = int(pred_stats.n_sites) if pred_stats else 0
     result["sites_missing_predictions"] = sites_missing
 
-    # ── SQL Server query — last successful CSV ingest ────────────────────
+    # ── Last successful CSV ingest ────────────────────────────────────────
     from app.models.ingestion import IngestionRun  # noqa: PLC0415
 
     result["last_ingest_at"] = None
     try:
-        with SessionLocal() as ssms:
-            ingest_row = ssms.execute(
+        with SessionLocal() as session:
+            ingest_row = session.execute(
                 select(IngestionRun.finished_at)
                 .where(IngestionRun.status == "success")
                 .order_by(IngestionRun.finished_at.desc())
@@ -404,6 +403,6 @@ def get_freshness(session_factory=None) -> dict:
         if ingest_row and ingest_row.finished_at:
             result["last_ingest_at"] = ingest_row.finished_at.isoformat()
     except Exception:
-        log.debug("Could not query SQL Server ingestion_runs for freshness", exc_info=True)
+        log.debug("Could not query ingestion_runs for freshness", exc_info=True)
 
     return result

@@ -1,8 +1,9 @@
 """
 Happy-path integration tests for the analytics API.
-These tests hit the real vedanta SQL Server database (OL_INCIDENTS table).
-They assert on response structure and sensible values rather than exact counts,
-since the underlying data may grow over time.
+
+These tests hit the real ``vedanta_risk`` PostgreSQL database (``ol_incidents``
+table).  They assert on response structure and sensible values rather than
+exact counts, since the underlying data may grow over time.
 
 Run with:
     cd backend && pytest tests/test_analytics.py -v
@@ -12,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.core.ssms import get_ssms_db, SSMSSession
+from app.core.database import get_db, SessionLocal
 
 # Use a fixed quarter that is guaranteed to have data in OL_INCIDENTS
 _TEST_QUARTER = "2024-Q1"   # Apr-Jun 2024 — confirmed present in the DB

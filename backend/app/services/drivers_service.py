@@ -1,7 +1,7 @@
 """
 Service layer for risk-driver and recommendation regeneration.
 
-Public API (for Vinay's endpoints):
+Public API (for the drivers / admin endpoints):
     regenerate_for_site(site, db=None) -> dict
         Re-computes SHAP drivers + rules-based recommendations for one site
         and persists the results.  Opens its own DB session internally;
@@ -23,6 +23,7 @@ import pandas as pd
 from sqlalchemy import select, text
 
 from app.core.database import SessionLocal
+from app.lib import quarters as Q
 from app.ml.drivers import compute_drivers_for_site
 from app.models.drivers import Recommendation, RiskDriver
 from app.models.ol_incidents import OLIncident
@@ -97,7 +98,7 @@ def _get_site_context(site: str, sf) -> dict:
     )
     return {
         "site": site,
-        "quarter": f"{row.year}-{row.quarter}",
+        "quarter": Q.csv_to_label(int(row.year), row.quarter),
         "total_incidents_qtr": row.total,
         "delta_qtr_pct": delta,
         "reporting_lag_p90": float(np.percentile(lags, 90)) if lags else None,

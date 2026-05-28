@@ -154,7 +154,7 @@ Single-row performance summary for a site (or all sites) in a quarter.
 
 Full risk-score history with optional per-site or latest-only filtering.
 
-> **Implementation note:** This endpoint uses `DATABASE_URL`. In the current deployment `DATABASE_URL` and `SSMS_DATABASE_URL` both point to the same SQL Server `vedanta` instance, so all data is accessible. If the two are ever separated (e.g. PostgreSQL for `DATABASE_URL`) this endpoint will return empty results until migrated.
+> **Implementation note:** This endpoint uses `DATABASE_URL`, which points to the PostgreSQL `vedanta_risk` database. All ML output tables (`risk_scores`, `predictions_cache`, `model_runs`, `risk_drivers`, `recommendations`, `backtest_results`, `pipeline_runs`, `ingestion_runs`) live in this same database, so no cross-database joins are needed.
 
 ### Query Parameters
 

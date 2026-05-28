@@ -1,6 +1,7 @@
 """
-Read-only analytics API.  All endpoints query OL_INCIDENTS in the vedanta
-SQL Server database.  Heavy aggregation results are cached for 5 minutes.
+Read-only analytics API.  All endpoints query the ``ol_incidents`` table in the
+PostgreSQL ``vedanta_risk`` database.  Heavy aggregation results are cached for
+5 minutes in a small in-process TTL cache.
 """
 
 import calendar
@@ -12,7 +13,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Integer, and_, case, cast, func, or_, select, text
 from sqlalchemy.orm import Session
 
-from app.core.ssms import get_ssms_db
+from app.core.database import get_db
 from app.models.ol_incidents import OLIncident
 from app.schemas.analytics import (
     HeatmapPoint,
@@ -137,7 +138,7 @@ def _risk_band(score: float) -> str:
 def list_sites(
     quarter: Optional[str] = Query(None, description="YYYY-Qn, defaults to latest complete"),
     business_unit: Optional[str] = Query(None),
-    db: Session = Depends(get_ssms_db),
+    db: Session = Depends(get_db),
 ):
     """All sites with their BU and incident count for the given (or latest complete) quarter."""
     year_s, q_s = _resolve_quarter(quarter, db)
@@ -170,7 +171,7 @@ def get_kpis(
     site: Optional[str] = Query(None),
     quarter: Optional[str] = Query(None, description="YYYY-Qn, defaults to latest complete"),
     business_unit: Optional[str] = Query(None),
-    db: Session = Depends(get_ssms_db),
+    db: Session = Depends(get_db),
 ):
     """
     Key performance indicators for a site (or all sites) in a quarter.
@@ -268,7 +269,7 @@ def incidents_by_type(
     site: Optional[str] = Query(None),
     quarter: Optional[str] = Query(None),
     business_unit: Optional[str] = Query(None),
-    db: Session = Depends(get_ssms_db),
+    db: Session = Depends(get_db),
 ):
     year_s, q_s = _resolve_quarter(quarter, db)
     cache_key = f"by_type:{site}:{year_s}:{q_s}:{business_unit}"
@@ -300,7 +301,7 @@ def incidents_by_category(
     site: Optional[str] = Query(None),
     quarter: Optional[str] = Query(None),
     business_unit: Optional[str] = Query(None),
-    db: Session = Depends(get_ssms_db),
+    db: Session = Depends(get_db),
 ):
     year_s, q_s = _resolve_quarter(quarter, db)
     cache_key = f"by_cat:{site}:{year_s}:{q_s}:{business_unit}"
@@ -336,7 +337,7 @@ def incidents_by_category(
 def incidents_by_site(
     quarter: Optional[str] = Query(None),
     business_unit: Optional[str] = Query(None),
-    db: Session = Depends(get_ssms_db),
+    db: Session = Depends(get_db),
 ):
     year_s, q_s = _resolve_quarter(quarter, db)
     cache_key = f"by_site:{year_s}:{q_s}:{business_unit}"
@@ -367,7 +368,7 @@ def incidents_trend(
     site: Optional[str] = Query(None),
     months: int = Query(12, ge=1, le=60),
     business_unit: Optional[str] = Query(None),
-    db: Session = Depends(get_ssms_db),
+    db: Session = Depends(get_db),
 ):
     """Monthly time series for a site (or all sites) with the all-sites average."""
     cache_key = f"trend:{site}:{months}:{business_unit}"
@@ -453,7 +454,7 @@ def incidents_trend(
 def incidents_heatmap(
     quarter: Optional[str] = Query(None),
     business_unit: Optional[str] = Query(None),
-    db: Session = Depends(get_ssms_db),
+    db: Session = Depends(get_db),
 ):
     """
     Per-site likelihood (normalised frequency) and impact (normalised severity)

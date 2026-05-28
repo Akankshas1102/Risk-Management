@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.ssms import get_ssms_db
+from app.core.database import get_db
 from app.models.drivers import Recommendation, RiskDriver
 from app.schemas.drivers import DriverItem, RecommendationItem
 
@@ -16,7 +16,7 @@ def get_drivers(
     site: str = Query(..., description="Site name"),
     quarter: Optional[str] = Query(None, description="YYYY-Qn; defaults to most recent"),
     n: int = Query(10, ge=1, le=50, description="Max drivers to return"),
-    db: Session = Depends(get_ssms_db),
+    db: Session = Depends(get_db),
 ):
     """
     Top N risk drivers for a site, sorted by impact_score descending.
@@ -46,7 +46,7 @@ def get_drivers(
 def get_recommendations(
     site: str = Query(..., description="Site name"),
     quarter: Optional[str] = Query(None, description="YYYY-Qn; defaults to most recent"),
-    db: Session = Depends(get_ssms_db),
+    db: Session = Depends(get_db),
 ):
     """
     Recommendations for a site grouped by priority (high → medium → low).

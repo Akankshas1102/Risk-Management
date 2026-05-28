@@ -202,10 +202,106 @@ export interface DiagnosticsResponse {
     insufficient_data: number
     low_accuracy: number
   }
+  accuracy?: SystemAccuracy
   sites: DiagnosticsSite[]
   alerts: {
     site_variants: DiagnosticsVariant[]
     category_variants: DiagnosticsVariant[]
     data_issues: DiagnosticsDataIssues
   }
+}
+
+
+// ---------- Site Detail (Data Health drawer) ----------
+
+export interface SiteDetailTotals {
+  incidents: number
+  distinct_months: number
+  distinct_quarters: number
+  first_incident: string | null
+  last_incident: string | null
+}
+
+export interface SiteDetailQuarterlyPoint {
+  quarter: string          // 'YYYY-Qn'
+  label: string            // '2024-Q1 (Apr-Jun 2024)'
+  incidents: number
+}
+
+export interface SiteDetailMonthlyPoint {
+  year: number
+  month: number
+  label: string
+  incidents: number
+}
+
+export interface SiteDetailYearlyPoint {
+  year: number
+  incidents: number
+}
+
+export interface SiteDetailTraining {
+  train_quarters: string[]
+  holdout_quarters: string[]
+  holdout_size: number
+}
+
+export interface SiteDetailModel {
+  champion_model: string | null
+  holdout_rmse: number | null
+  holdout_mape: number | null
+  training_rows: number | null
+  last_trained_at: string | null
+}
+
+export interface SiteDetailBacktestRow {
+  quarter: string
+  label: string
+  actual: number | null
+  predicted: number | null
+  abs_pct_error: number | null
+  within_20: boolean
+}
+
+export interface SiteDetailBacktest {
+  rows: SiteDetailBacktestRow[]
+  mean_ape: number | null
+  pct_within_20: number | null
+  pct_within_30: number | null
+  n_quarters: number
+}
+
+export interface SiteDetailForecastRow {
+  quarter: string
+  label: string
+  predicted: number | null
+  lower_ci: number | null
+  upper_ci: number | null
+  model_name: string | null
+  confidence_band: string | null
+  training_data_through: string | null
+}
+
+export interface SiteDetailResponse {
+  site: string
+  business_unit: string | null
+  totals: SiteDetailTotals
+  per_year: SiteDetailYearlyPoint[]
+  per_month: SiteDetailMonthlyPoint[]
+  quarterly_series: SiteDetailQuarterlyPoint[]
+  training: SiteDetailTraining
+  model: SiteDetailModel
+  backtest: SiteDetailBacktest
+  forecast: SiteDetailForecastRow[]
+  status: string
+  reason: string
+}
+
+export interface SystemAccuracy {
+  avg_pct_within_20: number | null
+  weighted_pct_within_20: number | null
+  sites_evaluated: number
+  sites_total: number
+  sites_no_model: number
+  sites_sparse_bu_fallback: number
 }
