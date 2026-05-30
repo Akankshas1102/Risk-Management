@@ -27,10 +27,15 @@ export function KpiCard({ title, value, delta, subtitle, loading, accentColor }:
   const deltaZero = delta == null || delta === 0
 
   return (
-    <Card className={cn('p-5 border-l-4', accentColor ?? 'border-l-brand-500')}>
+    <Card
+      className={cn(
+        'p-5 border-l-4 card-hover animate-fade-rise',
+        accentColor ?? 'border-l-primary',
+      )}
+    >
       <CardContent className="p-0 space-y-1">
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">{title}</p>
-        <p className="text-3xl font-bold text-slate-900 tabular-nums leading-none">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">{title}</p>
+        <p className="text-3xl font-bold text-foreground tabular-nums leading-none">
           {value ?? '—'}
         </p>
         {(delta != null || subtitle) && (
@@ -39,7 +44,9 @@ export function KpiCard({ title, value, delta, subtitle, loading, accentColor }:
               <span
                 className={cn(
                   'flex items-center gap-0.5 text-xs font-medium rounded-full px-1.5 py-0.5',
-                  deltaPositive ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600',
+                  deltaPositive
+                    ? 'bg-danger/10 text-danger'
+                    : 'bg-success/10 text-success',
                 )}
               >
                 {deltaPositive ? (
@@ -51,12 +58,12 @@ export function KpiCard({ title, value, delta, subtitle, loading, accentColor }:
               </span>
             )}
             {deltaZero && delta === 0 && (
-              <span className="flex items-center gap-0.5 text-xs font-medium bg-slate-50 text-slate-500 rounded-full px-1.5 py-0.5">
+              <span className="flex items-center gap-0.5 text-xs font-medium bg-muted text-muted-foreground rounded-full px-1.5 py-0.5">
                 <Minus className="h-3 w-3" />
                 0%
               </span>
             )}
-            {subtitle && <p className="text-xs text-slate-400">{subtitle}</p>}
+            {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
           </div>
         )}
       </CardContent>

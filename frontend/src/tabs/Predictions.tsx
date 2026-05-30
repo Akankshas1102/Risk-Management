@@ -9,8 +9,9 @@ import { useFilters } from '@/context/FilterContext'
 import { usePredictions, useIncidentTrend, useBacktest } from '@/api/hooks'
 import { ChartCard } from '@/components/common/ChartCard'
 import { SeverityBadge } from '@/components/common/SeverityBadge'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useChartTheme } from '@/lib/useChartTheme'
 import { cn } from '@/lib/utils'
 import type { TrendPoint, BacktestPoint, PredictionItem } from '@/types/api'
 
@@ -20,9 +21,9 @@ import type { TrendPoint, BacktestPoint, PredictionItem } from '@/types/api'
 
 function confidenceBorderColor(band: string | null | undefined) {
   switch ((band ?? '').toLowerCase()) {
-    case 'high':   return 'border-l-green-500'
-    case 'medium': return 'border-l-amber-500'
-    default:       return 'border-l-red-400'
+    case 'high':   return 'border-l-success'
+    case 'medium': return 'border-l-warning'
+    default:       return 'border-l-danger'
   }
 }
 
@@ -119,16 +120,16 @@ function MetaCard({
   loading?: boolean
 }) {
   return (
-    <Card className="p-4 flex items-center gap-3">
-      <div className="shrink-0 h-8 w-8 rounded-lg bg-brand-50 flex items-center justify-center text-brand-600">
+    <Card className="p-4 flex items-center gap-3 card-hover">
+      <div className="shrink-0 h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
         {icon}
       </div>
       <div className="min-w-0">
-        <p className="text-xs text-slate-400 uppercase tracking-wider font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium">{label}</p>
         {loading ? (
           <Skeleton className="h-5 w-20 mt-1" />
         ) : (
-          <p className="text-sm font-semibold text-slate-800 truncate">{value ?? '—'}</p>
+          <p className="text-sm font-semibold text-foreground truncate">{value ?? '—'}</p>
         )}
       </div>
     </Card>
@@ -146,8 +147,8 @@ function ChartTooltip({ active, payload, label }: {
 }) {
   if (!active || !payload?.length) return null
   return (
-    <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-3 text-xs space-y-1 min-w-[140px]">
-      <p className="font-semibold text-slate-700">{label}</p>
+    <div className="bg-popover border border-border rounded-lg shadow-lg p-3 text-xs space-y-1 min-w-[140px] text-popover-foreground">
+      <p className="font-semibold">{label}</p>
       {payload.map((entry) =>
         entry.value != null ? (
           <div key={entry.name} className="flex justify-between gap-4">
@@ -169,6 +170,7 @@ export function Predictions() {
   const predQ    = usePredictions(selectedSite)
   const trendQ   = useIncidentTrend(selectedSite, 12)
   const backtestQ = useBacktest(selectedSite)
+  const ct = useChartTheme()
 
   const response  = predQ.data
   const meta      = response?.model_meta
@@ -230,71 +232,32 @@ export function Predictions() {
       >
         <ResponsiveContainer width="100%" height={320}>
           <ComposedChart data={chartData} margin={{ top: 10, right: 30, bottom: 0, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-            <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} />
-            <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: ct.axis }} tickLine={false} />
+            <YAxis tick={{ fontSize: 10, fill: ct.axis }} tickLine={false} axisLine={false} />
             <Tooltip content={<ChartTooltip />} />
             <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
 
             {/* CI band: transparent base + coloured diff */}
-            <Area
-              dataKey="lower"
-              stackId="ci"
-              fill="transparent"
-              stroke="none"
-              legendType="none"
-              name="CI lower"
-            />
-            <Area
-              dataKey="upper_diff"
-              stackId="ci"
-              fill="#fb923c"
-              fillOpacity={0.18}
-              stroke="none"
-              name="80% CI"
-            />
+            <Area dataKey="lower" stackId="ci" fill="transparent" stroke="none" legendType="none" name="CI lower" />
+            <Area dataKey="upper_diff" stackId="ci" fill={ct.warning} fillOpacity={0.18} stroke="none" name="80% CI" />
 
             {/* Actual historical */}
-            <Line
-              type="monotone"
-              dataKey="actual"
-              stroke="#3b82f6"
-              strokeWidth={2}
-              dot={{ r: 3, fill: '#3b82f6' }}
-              connectNulls={false}
-              name="Actual"
-            />
+            <Line type="monotone" dataKey="actual" stroke={ct.primary} strokeWidth={2} dot={{ r: 3, fill: ct.primary }} connectNulls={false} name="Actual" />
 
             {/* Backtest (model in-sample) */}
-            <Line
-              type="monotone"
-              dataKey="backtest"
-              stroke="#f97316"
-              strokeWidth={1.8}
-              strokeDasharray="5 3"
-              dot={false}
-              connectNulls={false}
-              name="Backtest"
-            />
+            <Line type="monotone" dataKey="backtest" stroke={ct.warning} strokeWidth={1.8} strokeDasharray="5 3" dot={false} connectNulls={false} name="Backtest" />
 
             {/* Forecast */}
-            <Line
-              type="monotone"
-              dataKey="forecast"
-              stroke="#f97316"
-              strokeWidth={2.5}
-              dot={{ r: 5, fill: '#f97316', stroke: 'white', strokeWidth: 2 }}
-              connectNulls={false}
-              name="Forecast"
-            />
+            <Line type="monotone" dataKey="forecast" stroke={ct.warning} strokeWidth={2.5} dot={{ r: 5, fill: ct.warning, stroke: ct.tooltipBg, strokeWidth: 2 }} connectNulls={false} name="Forecast" />
 
             {/* Today reference line */}
             {chartData.find((d) => d.isToday) && (
               <ReferenceLine
                 x={chartData.find((d) => d.isToday)?.label}
-                stroke="#94a3b8"
+                stroke={ct.axis}
                 strokeDasharray="4 4"
-                label={{ value: 'Today', position: 'top', fontSize: 10, fill: '#94a3b8' }}
+                label={{ value: 'Today', position: 'top', fontSize: 10, fill: ct.axis }}
               />
             )}
           </ComposedChart>
@@ -306,18 +269,18 @@ export function Predictions() {
         <Card className="px-5 py-4 flex items-center gap-4">
           <div className={cn(
             'h-12 w-12 rounded-full flex items-center justify-center text-sm font-bold shrink-0',
-            accuracy.pct >= 75 ? 'bg-green-100 text-green-700' :
-            accuracy.pct >= 50 ? 'bg-amber-100 text-amber-700' :
-                                  'bg-red-100 text-red-700',
+            accuracy.pct >= 75 ? 'bg-success/15 text-success' :
+            accuracy.pct >= 50 ? 'bg-warning/15 text-warning' :
+                                  'bg-danger/15 text-danger',
           )}>
             {accuracy.pct}%
           </div>
           <div>
-            <p className="text-sm font-semibold text-slate-800">Accuracy at a Glance</p>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-sm font-semibold text-foreground">Accuracy at a Glance</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
               Model predicted within ±{accuracy.threshold}% of actual in{' '}
-              <span className="font-medium">{accuracy.pct}%</span> of recent months
-              {backtest.length > 0 && ` (${backtest.length}-month backtest)`}
+              <span className="font-medium">{accuracy.pct}%</span> of recent quarters
+              {backtest.length > 0 && ` (${backtest.length}-quarter backtest)`}
             </p>
           </div>
         </Card>
@@ -342,22 +305,22 @@ export function Predictions() {
               return (
                 <Card
                   key={p.id}
-                  className={cn('p-5 border-l-4', confidenceBorderColor(p.confidence_band))}
+                  className={cn('p-5 border-l-4 card-hover', confidenceBorderColor(p.confidence_band))}
                 >
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                     {p.target_quarter}
                   </p>
-                  <p className="text-3xl font-bold text-slate-900 mt-1 tabular-nums">
+                  <p className="text-3xl font-bold text-foreground mt-1 tabular-nums">
                     {p.predicted_count != null ? Math.round(p.predicted_count) : '—'}
                   </p>
                   {displayRange && (
-                    <p className="text-xs text-slate-400 mt-1 tabular-nums">
+                    <p className="text-xs text-muted-foreground mt-1 tabular-nums">
                       Range: {displayRange}
                     </p>
                   )}
                   <div className="mt-2 flex items-center gap-2">
                     <SeverityBadge band={p.confidence_band} size="sm" />
-                    <span className="text-xs text-slate-400 capitalize">{p.model_name}</span>
+                    <span className="text-xs text-muted-foreground capitalize">{p.model_name}</span>
                   </div>
                 </Card>
               )

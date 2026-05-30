@@ -24,24 +24,24 @@ import type { DiagnosticsSite } from '@/types/api'
 
 function statusColor(status: string): string {
   switch (status) {
-    case 'Healthy':            return 'bg-green-100 text-green-700 border-green-200'
-    case 'OK':                 return 'bg-blue-100 text-blue-700 border-blue-200'
-    case 'Sparse - BU fallback': return 'bg-amber-100 text-amber-700 border-amber-200'
-    case 'Low accuracy':       return 'bg-orange-100 text-orange-700 border-orange-200'
-    case 'No backtest':        return 'bg-slate-100 text-slate-600 border-slate-200'
-    case 'Insufficient data':  return 'bg-red-100 text-red-700 border-red-200'
-    default:                   return 'bg-slate-100 text-slate-600 border-slate-200'
+    case 'Healthy':            return 'bg-success/10 text-success border-success/20'
+    case 'OK':                 return 'bg-chart-3/10 text-chart-3 border-chart-3/20'
+    case 'Sparse - BU fallback': return 'bg-warning/10 text-warning border-warning/20'
+    case 'Low accuracy':       return 'bg-warning/10 text-warning border-warning/20'
+    case 'No backtest':        return 'bg-muted text-muted-foreground border-border'
+    case 'Insufficient data':  return 'bg-danger/10 text-danger border-danger/20'
+    default:                   return 'bg-muted text-muted-foreground border-border'
   }
 }
 
 function stepDot(status: string | null | undefined) {
   if (status === 'ok') {
-    return <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-500" />
+    return <span className="inline-block h-2.5 w-2.5 rounded-full bg-success" />
   }
   if (status === 'error') {
-    return <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
+    return <span className="inline-block h-2.5 w-2.5 rounded-full bg-danger" />
   }
-  return <span className="inline-block h-2.5 w-2.5 rounded-full bg-slate-300" />
+  return <span className="inline-block h-2.5 w-2.5 rounded-full bg-muted-foreground/40" />
 }
 
 function formatRelative(iso: string | null | undefined): string {
@@ -81,29 +81,29 @@ function PipelineBanner({
     <Card className="p-5">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div>
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Last Pipeline Run
           </p>
-          <p className="text-sm font-semibold text-slate-800 mt-1">
+          <p className="text-sm font-semibold text-foreground mt-1">
             {lastRun?.status ? lastRun.status.toUpperCase() : '—'}
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted-foreground">
             {formatRelative(lastRun?.finished_at)} ·{' '}
             {lastRun?.total_duration_s != null ? `${lastRun.total_duration_s}s` : '—'}
           </p>
-          <p className="text-xs text-slate-400 mt-0.5">trigger: {lastRun?.trigger ?? '—'}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">trigger: {lastRun?.trigger ?? '—'}</p>
         </div>
 
         <div>
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Pipeline Steps
           </p>
           <div className="mt-2 space-y-1.5">
             {stepNames.map((name) => (
-              <div key={name} className="flex items-center gap-2 text-xs text-slate-600">
+              <div key={name} className="flex items-center gap-2 text-xs text-foreground/80">
                 {stepDot(steps[name]?.status)}
                 <span className="font-medium">{name}</span>
-                <span className="text-slate-400 ml-auto tabular-nums">
+                <span className="text-muted-foreground ml-auto tabular-nums">
                   {steps[name]?.duration_s != null ? `${steps[name].duration_s}s` : '—'}
                 </span>
               </div>
@@ -112,31 +112,31 @@ function PipelineBanner({
         </div>
 
         <div>
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Next Scheduled Run
           </p>
-          <p className="text-sm font-semibold text-slate-800 mt-1 flex items-center gap-1.5">
-            <Clock className="h-4 w-4 text-slate-400" />
+          <p className="text-sm font-semibold text-foreground mt-1 flex items-center gap-1.5">
+            <Clock className="h-4 w-4 text-muted-foreground" />
             {nextRunAt ? formatRelative(nextRunAt) : 'Not scheduled'}
           </p>
-          <p className="text-xs text-slate-400 mt-0.5">cron: nightly 02:00 UTC</p>
+          <p className="text-xs text-muted-foreground mt-0.5">cron: nightly 02:00 UTC</p>
         </div>
 
         <div>
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Data Freshness
           </p>
-          <p className="text-sm font-semibold text-slate-800 mt-1 flex items-center gap-1.5">
-            <Database className="h-4 w-4 text-slate-400" />
+          <p className="text-sm font-semibold text-foreground mt-1 flex items-center gap-1.5">
+            <Database className="h-4 w-4 text-muted-foreground" />
             {latestData ?? '—'}
           </p>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-muted-foreground mt-0.5">
             latest predicted quarter: {latestPredicted ?? '—'}
           </p>
         </div>
       </div>
       {lastRun?.error_summary && (
-        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+        <div className="mt-4 p-3 bg-danger/10 border border-danger/20 rounded text-xs text-danger">
           <p className="font-semibold mb-1">Last run errors:</p>
           <p className="font-mono whitespace-pre-wrap">{lastRun.error_summary}</p>
         </div>
@@ -187,7 +187,7 @@ function SiteHealthTable({
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           <span>Per-Site Data & Model Health</span>
-          <span className="text-xs font-normal text-slate-400">
+          <span className="text-xs font-normal text-muted-foreground">
             {filtered.length} of {sites.length} sites
           </span>
         </CardTitle>
@@ -195,7 +195,7 @@ function SiteHealthTable({
       <CardContent className="p-0 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400">
+            <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
               <th className="px-4 py-2.5 text-left">Site</th>
               <th className="px-4 py-2.5 text-left">BU</th>
               <th className="px-4 py-2.5 text-right">
@@ -237,7 +237,7 @@ function SiteHealthTable({
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center text-slate-400">
+                <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                   No sites match the current filters.
                 </td>
               </tr>
@@ -246,28 +246,28 @@ function SiteHealthTable({
                 <tr
                   key={s.site}
                   onClick={() => onSelectSite(s.site)}
-                  className="border-b border-slate-50 hover:bg-brand-50 cursor-pointer"
+                  className="border-b border-border/50 hover:bg-accent/40 cursor-pointer transition-colors"
                   title="Click for full details"
                 >
-                  <td className="px-4 py-2.5 font-medium text-slate-700 max-w-[180px]">
+                  <td className="px-4 py-2.5 font-medium text-foreground max-w-[180px]">
                     <span className="truncate block" title={s.site}>{s.site}</span>
                   </td>
-                  <td className="px-4 py-2.5 text-slate-500 text-xs max-w-[140px]">
+                  <td className="px-4 py-2.5 text-muted-foreground text-xs max-w-[140px]">
                     <span className="truncate block" title={s.business_unit ?? ''}>
                       {s.business_unit ?? '—'}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">
+                  <td className="px-4 py-2.5 text-right tabular-nums text-foreground">
                     {s.incidents.toLocaleString()}
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{s.n_months}</td>
-                  <td className="px-4 py-2.5 text-xs text-slate-600 capitalize">
+                  <td className="px-4 py-2.5 text-right tabular-nums text-foreground">{s.n_months}</td>
+                  <td className="px-4 py-2.5 text-xs text-foreground/80 capitalize">
                     {s.champion_model ?? '—'}
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-xs">
+                  <td className="px-4 py-2.5 text-right tabular-nums text-xs text-foreground">
                     {s.holdout_mape != null ? `${s.holdout_mape}%` : '—'}
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-xs">
+                  <td className="px-4 py-2.5 text-right tabular-nums text-xs text-foreground">
                     {s.backtest_pct_within_20 != null ? `${s.backtest_pct_within_20}%` : '—'}
                   </td>
                   <td className="px-4 py-2.5">
@@ -319,21 +319,21 @@ function AlertsPanel({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-amber-500" />
+            <AlertTriangle className="h-4 w-4 text-warning" />
             Data Quality Issues
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          <p className="text-xs text-slate-500">
-            Total rows: <span className="font-semibold tabular-nums">{dataIssues?.total_rows?.toLocaleString() ?? '—'}</span>
+          <p className="text-xs text-muted-foreground">
+            Total rows: <span className="font-semibold tabular-nums text-foreground">{dataIssues?.total_rows?.toLocaleString() ?? '—'}</span>
           </p>
           <div className="space-y-1.5">
             {issueChips.map((c) => (
               <div key={c.label} className="flex items-center justify-between text-xs">
-                <span className="text-slate-600">{c.label}</span>
+                <span className="text-muted-foreground">{c.label}</span>
                 <span className={cn(
                   'tabular-nums font-semibold px-2 py-0.5 rounded',
-                  c.count > 0 ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700',
+                  c.count > 0 ? 'bg-danger/10 text-danger' : 'bg-success/10 text-success',
                 )}>
                   {c.count}
                 </span>
@@ -341,7 +341,7 @@ function AlertsPanel({
             ))}
           </div>
           {!hasAnyIssue && (
-            <div className="flex items-center gap-1.5 text-xs text-green-600 pt-2">
+            <div className="flex items-center gap-1.5 text-xs text-success pt-2">
               <CheckCircle2 className="h-3.5 w-3.5" />
               No data quality issues detected.
             </div>
@@ -353,19 +353,19 @@ function AlertsPanel({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Wrench className="h-4 w-4 text-orange-500" />
+            <Wrench className="h-4 w-4 text-warning" />
             Site Name Variants
           </CardTitle>
         </CardHeader>
         <CardContent>
           {siteVariants.length === 0 ? (
-            <p className="text-xs text-slate-400 italic">No duplicate site spellings detected.</p>
+            <p className="text-xs text-muted-foreground italic">No duplicate site spellings detected.</p>
           ) : (
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {siteVariants.map((v) => (
                 <div key={v.canonical} className="text-xs">
-                  <p className="font-semibold text-slate-700">{v.canonical}</p>
-                  <p className="text-slate-500 text-[11px] mt-0.5 break-words">{v.variants}</p>
+                  <p className="font-semibold text-foreground">{v.canonical}</p>
+                  <p className="text-muted-foreground text-[11px] mt-0.5 break-words">{v.variants}</p>
                 </div>
               ))}
             </div>
@@ -377,19 +377,19 @@ function AlertsPanel({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Wrench className="h-4 w-4 text-orange-500" />
+            <Wrench className="h-4 w-4 text-warning" />
             Category Name Variants
           </CardTitle>
         </CardHeader>
         <CardContent>
           {categoryVariants.length === 0 ? (
-            <p className="text-xs text-slate-400 italic">No duplicate category spellings detected.</p>
+            <p className="text-xs text-muted-foreground italic">No duplicate category spellings detected.</p>
           ) : (
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {categoryVariants.map((v) => (
                 <div key={v.canonical} className="text-xs">
-                  <p className="font-semibold text-slate-700">{v.canonical}</p>
-                  <p className="text-slate-500 text-[11px] mt-0.5 break-words">{v.variants}</p>
+                  <p className="font-semibold text-foreground">{v.canonical}</p>
+                  <p className="text-muted-foreground text-[11px] mt-0.5 break-words">{v.variants}</p>
                 </div>
               ))}
             </div>
@@ -428,12 +428,12 @@ export function DataHealth() {
   if (diag.isError) {
     return (
       <Card className="p-8">
-        <div className="flex flex-col items-center gap-3 text-slate-500">
-          <XCircle className="h-10 w-10 text-red-400" />
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <XCircle className="h-10 w-10 text-danger" />
           <p className="font-semibold">Failed to load diagnostics</p>
           <button
             onClick={() => diag.refetch()}
-            className="text-sm text-brand-600 hover:underline flex items-center gap-1"
+            className="text-sm text-primary hover:underline flex items-center gap-1"
           >
             <RefreshCw className="h-3.5 w-3.5" /> Retry
           </button>
@@ -447,17 +447,17 @@ export function DataHealth() {
       {/* ── Page heading ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-            <Wrench className="h-5 w-5 text-slate-500" />
+          <h1 className="text-lg font-bold text-foreground flex items-center gap-2">
+            <Wrench className="h-5 w-5 text-muted-foreground" />
             Data & Model Health
           </h1>
-          <p className="text-sm text-slate-500 mt-0.5">
+          <p className="text-sm text-muted-foreground mt-0.5">
             Pipeline status, per-site data quality, and source-data anomalies.
           </p>
         </div>
         <button
           onClick={() => diag.refetch()}
-          className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1 border border-slate-200 rounded px-3 py-1.5"
+          className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 border border-border rounded px-3 py-1.5 hover:bg-muted transition-colors"
         >
           <RefreshCw className={cn('h-3.5 w-3.5', diag.isFetching && 'animate-spin')} />
           Refresh
@@ -489,12 +489,12 @@ export function DataHealth() {
           }
           accentColor={
             accuracy?.weighted_pct_within_20 == null
-              ? 'border-l-slate-300'
+              ? 'border-l-muted-foreground/40'
               : accuracy.weighted_pct_within_20 >= 75
-              ? 'border-l-green-500'
+              ? 'border-l-success'
               : accuracy.weighted_pct_within_20 >= 50
-              ? 'border-l-blue-500'
-              : 'border-l-orange-500'
+              ? 'border-l-chart-3'
+              : 'border-l-warning'
           }
           loading={loading}
         />
@@ -508,21 +508,21 @@ export function DataHealth() {
           title="Healthy"
           value={summary?.healthy ?? 0}
           subtitle="accuracy ≥ 75%"
-          accentColor="border-l-green-500"
+          accentColor="border-l-success"
           loading={loading}
         />
         <KpiCard
           title="Sparse / BU Fallback"
           value={summary?.sparse_bu_fallback ?? 0}
           subtitle="< 50 incidents or < 4 quarters"
-          accentColor="border-l-amber-400"
+          accentColor="border-l-warning"
           loading={loading}
         />
         <KpiCard
           title="Insufficient Data"
           value={summary?.insufficient_data ?? 0}
           subtitle="no champion model"
-          accentColor="border-l-red-500"
+          accentColor="border-l-danger"
           loading={loading}
         />
       </div>
@@ -535,7 +535,7 @@ export function DataHealth() {
             placeholder="Search site or BU..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="border border-slate-200 rounded px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-brand-200"
+            className="border border-border bg-card text-foreground rounded px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground"
           />
           <div className="flex flex-wrap gap-1.5">
             {statusFilters.map((f) => (
@@ -543,10 +543,10 @@ export function DataHealth() {
                 key={f.value}
                 onClick={() => setFilter(f.value)}
                 className={cn(
-                  'text-xs px-2.5 py-1 rounded-full border transition',
+                  'text-xs px-2.5 py-1 rounded-full border transition-colors',
                   filter === f.value
-                    ? 'bg-brand-600 text-white border-brand-600'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50',
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-card text-muted-foreground border-border hover:bg-muted',
                 )}
               >
                 {f.label}

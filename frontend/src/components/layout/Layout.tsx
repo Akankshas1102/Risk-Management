@@ -14,7 +14,7 @@ export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
   const sidebarWidth = collapsed ? 64 : 224
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    <div className="min-h-screen bg-background text-foreground">
       <Sidebar
         activeTab={activeTab}
         onTabChange={onTabChange}
@@ -23,7 +23,7 @@ export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
       />
       <Header sidebarWidth={sidebarWidth} />
       <main
-        className="pt-16 pb-8 transition-all duration-200 min-h-screen"
+        className="pt-16 pb-10 transition-all duration-200 min-h-screen"
         style={{ marginLeft: sidebarWidth }}
       >
         <div className="p-6">{children}</div>

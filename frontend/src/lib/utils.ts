@@ -5,19 +5,29 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-/** Fiscal quarter helpers — Q4=Jan-Mar, Q1=Apr-Jun, Q2=Jul-Sep, Q3=Oct-Dec */
-const FISCAL_ORDER = ['Q4', 'Q1', 'Q2', 'Q3'] as const
+/**
+ * Fiscal quarter helpers — fiscal-year-START convention.
+ *   Q1 = Apr-Jun, Q2 = Jul-Sep, Q3 = Oct-Dec, Q4 = Jan-Mar (wraps into next year)
+ * Label format is `YYYY-Qn` where YYYY is the fiscal-year start year.
+ */
+const FISCAL_ORDER = ['Q1', 'Q2', 'Q3', 'Q4'] as const
+
+/** (calendar year, month 1-12) → [fiscalYearStart, 'Qn'] */
+function toFiscal(year: number, month: number): [number, string] {
+  if (month >= 4 && month <= 6) return [year, 'Q1']
+  if (month >= 7 && month <= 9) return [year, 'Q2']
+  if (month >= 10) return [year, 'Q3']
+  return [year - 1, 'Q4'] // Jan-Mar belongs to previous fiscal-year start
+}
 
 function currentFiscalQ(): [number, string] {
   const now = new Date()
-  const m = now.getMonth() + 1
-  const q = m >= 10 ? 'Q3' : m >= 7 ? 'Q2' : m >= 4 ? 'Q1' : 'Q4'
-  return [now.getFullYear(), q]
+  return toFiscal(now.getFullYear(), now.getMonth() + 1)
 }
 
 function prevFiscalQ(year: number, q: string): [number, string] {
   const idx = FISCAL_ORDER.indexOf(q as (typeof FISCAL_ORDER)[number])
-  if (idx === 0) return [year - 1, 'Q3']
+  if (idx === 0) return [year - 1, 'Q4']
   return [year, FISCAL_ORDER[idx - 1]]
 }
 
@@ -44,15 +54,17 @@ export function formatDelta(val: number | null | undefined): string {
   return `${sign}${val.toFixed(1)}%`
 }
 
+/** Theme-aware tint classes for a risk band (work in light + dark). */
 export function riskColor(band: string | null | undefined): string {
   switch ((band ?? '').toLowerCase()) {
-    case 'critical': return 'text-red-600 bg-red-50'
-    case 'high':     return 'text-orange-600 bg-orange-50'
-    case 'medium':   return 'text-amber-600 bg-amber-50'
-    default:         return 'text-green-600 bg-green-50'
+    case 'critical': return 'text-danger bg-danger/10'
+    case 'high':     return 'text-warning bg-warning/10'
+    case 'medium':   return 'text-warning bg-warning/10'
+    default:         return 'text-success bg-success/10'
   }
 }
 
+/** Solid dot colours for scatter/heatmap marks (fixed hex, fine in both themes). */
 export function riskDot(band: string | null | undefined): string {
   switch ((band ?? '').toLowerCase()) {
     case 'critical': return '#ef4444'

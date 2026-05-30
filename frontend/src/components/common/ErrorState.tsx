@@ -8,8 +8,8 @@ interface Props {
 
 export function ErrorState({ message = 'Failed to load data', onRetry }: Props) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-12 text-slate-400">
-      <AlertCircle className="h-10 w-10 text-slate-300" />
+    <div className="flex flex-col items-center justify-center gap-3 py-12 text-muted-foreground">
+      <AlertCircle className="h-10 w-10 opacity-50" />
       <p className="text-sm">{message}</p>
       {onRetry && (
         <Button variant="outline" size="sm" onClick={onRetry}>

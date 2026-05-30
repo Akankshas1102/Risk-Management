@@ -2,31 +2,167 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ===========================================================================
+   THEME TOKENS  (channel triplets → used as rgb(var(--x) / <alpha-value>))
+   Light theme = :root, Dark theme = .dark
+   Palette: indigo/violet primary, calm surfaces, high-contrast text.
+   =========================================================================== */
+
+:root {
+  --background: 245 245 255;
+  --foreground: 42 42 74;
+
+  --card: 255 255 255;
+  --card-foreground: 42 42 74;
+
+  --popover: 255 255 255;
+  --popover-foreground: 42 42 74;
+
+  --muted: 240 240 250;
+  --muted-foreground: 108 108 138;
+
+  --accent: 216 230 255;
+  --accent-foreground: 42 42 74;
+
+  --border: 224 224 240;
+  --input: 224 224 240;
+  --ring: 110 86 207;
+
+  --primary: 110 86 207;
+  --primary-foreground: 255 255 255;
+
+  --secondary: 228 223 255;
+  --secondary-foreground: 74 64 128;
+
+  --destructive: 255 84 112;
+  --destructive-foreground: 255 255 255;
+
+  --sidebar: 26 26 46;
+  --sidebar-foreground: 226 226 245;
+  --sidebar-muted: 160 160 192;
+  --sidebar-accent: 110 86 207;
+  --sidebar-border: 48 48 82;
+
+  --chart-1: 110 86 207;
+  --chart-2: 158 140 252;
+  --chart-3: 93 95 239;
+  --chart-4: 124 117 250;
+  --chart-5: 71 64 179;
+
+  --success: 22 163 74;
+  --warning: 217 119 6;
+  --danger: 220 38 38;
+
+  --shadow-color: 240 30% 25%;
+}
+
+.dark {
+  --background: 15 15 26;
+  --foreground: 226 226 245;
+
+  --card: 26 26 46;
+  --card-foreground: 226 226 245;
+
+  --popover: 26 26 46;
+  --popover-foreground: 226 226 245;
+
+  --muted: 34 34 68;
+  --muted-foreground: 160 160 192;
+
+  --accent: 48 48 96;
+  --accent-foreground: 226 226 245;
+
+  --border: 48 48 82;
+  --input: 48 48 82;
+  --ring: 164 143 255;
+
+  --primary: 164 143 255;
+  --primary-foreground: 15 15 26;
+
+  --secondary: 45 43 85;
+  --secondary-foreground: 196 194 255;
+
+  --destructive: 255 84 112;
+  --destructive-foreground: 255 255 255;
+
+  --sidebar: 17 17 30;
+  --sidebar-foreground: 226 226 245;
+  --sidebar-muted: 140 140 175;
+  --sidebar-accent: 164 143 255;
+  --sidebar-border: 48 48 82;
+
+  --chart-1: 164 143 255;
+  --chart-2: 121 134 203;
+  --chart-3: 100 181 246;
+  --chart-4: 77 182 172;
+  --chart-5: 255 121 198;
+
+  --success: 74 222 128;
+  --warning: 251 191 36;
+  --danger: 248 113 113;
+
+  --shadow-color: 240 60% 4%;
+}
+
 @layer base {
-  *, *::before, *::after {
-    box-sizing: border-box;
-  }
+  *, *::before, *::after { box-sizing: border-box; }
+
   html {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-      sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+      'Helvetica Neue', Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
   body {
-    @apply bg-slate-100 text-slate-900;
+    @apply bg-background text-foreground;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  /* Themed native scrollbars */
+  * {
+    scrollbar-color: rgb(var(--muted-foreground) / 0.4) transparent;
+  }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: rgb(var(--muted-foreground) / 0.35);
+    border-radius: 9999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--muted-foreground) / 0.55);
   }
 }
 
 @layer utilities {
-  .tabular-nums {
-    font-variant-numeric: tabular-nums;
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+
+  /* Card entrance animation */
+  @keyframes fade-rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-rise { animation: fade-rise 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+  /* Soft shimmer for skeletons already handled by pulse */
+  .card-hover {
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+  .card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 28px -12px rgb(var(--shadow-color) / 0.45);
   }
 }
 
-/* Recharts tooltip fix */
-.recharts-tooltip-wrapper {
-  outline: none;
-}
+/* Recharts theming */
+.recharts-tooltip-wrapper { outline: none; }
 .recharts-default-tooltip {
-  @apply bg-white border border-slate-200 rounded-lg shadow-lg text-xs;
+  background-color: rgb(var(--popover)) !important;
+  border: 1px solid rgb(var(--border)) !important;
+  border-radius: 0.5rem !important;
+  color: rgb(var(--popover-foreground)) !important;
+  font-size: 0.75rem;
+  box-shadow: 0 8px 24px -8px rgb(var(--shadow-color) / 0.4);
 }
+.recharts-cartesian-grid line { stroke: rgb(var(--border) / 0.6); }
+.recharts-text { fill: rgb(var(--muted-foreground)); }

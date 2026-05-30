@@ -9,13 +9,11 @@ import { useIncidentTrend, useIncidentsByCategory } from '@/api/hooks'
 import { ChartCard } from '@/components/common/ChartCard'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useChartTheme } from '@/lib/useChartTheme'
 import { cn } from '@/lib/utils'
 
 function MiniTrendCard({
-  label,
-  value,
-  delta,
-  loading,
+  label, value, delta, loading,
 }: {
   label: string
   value: string | number
@@ -33,22 +31,20 @@ function MiniTrendCard({
   const up = (delta ?? 0) > 0
   const flat = delta == null || Math.abs(delta) < 0.1
   return (
-    <Card className="p-4">
-      <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">{label}</p>
-      <p className="text-2xl font-bold text-slate-900 mt-1">{value}</p>
+    <Card className="p-4 card-hover animate-fade-rise">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
+      <p className="text-2xl font-bold text-foreground mt-1">{value}</p>
       {!flat && (
-        <span
-          className={cn(
-            'mt-1 inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded-full',
-            up ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600',
-          )}
-        >
+        <span className={cn(
+          'mt-1 inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded-full',
+          up ? 'bg-danger/10 text-danger' : 'bg-success/10 text-success',
+        )}>
           {up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
           {Math.abs(delta!).toFixed(1)}%
         </span>
       )}
       {flat && (
-        <span className="mt-1 inline-flex items-center gap-0.5 text-xs text-slate-400 px-1.5 py-0.5 rounded-full bg-slate-50">
+        <span className="mt-1 inline-flex items-center gap-0.5 text-xs text-muted-foreground px-1.5 py-0.5 rounded-full bg-muted">
           <Minus className="h-3 w-3" /> Stable
         </span>
       )}
@@ -56,10 +52,12 @@ function MiniTrendCard({
   )
 }
 
+
 export function Trends() {
   const { selectedSite, selectedQuarter } = useFilters()
   const trendQ = useIncidentTrend(selectedSite, 12)
   const catsQ  = useIncidentsByCategory(selectedSite, selectedQuarter)
+  const ct = useChartTheme()
 
   const trend = trendQ.data ?? []
   const last3 = trend.slice(-3)
@@ -70,32 +68,13 @@ export function Trends() {
 
   return (
     <div className="space-y-6">
-      {/* ── Mini trend cards ──────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MiniTrendCard
-          label="3-Month Avg"
-          value={recentAvg.toFixed(0)}
-          delta={delta}
-          loading={trendQ.isPending}
-        />
-        <MiniTrendCard
-          label="Peak (12mo)"
-          value={trend.length ? Math.max(...trend.map((d) => d.count)) : '—'}
-          loading={trendQ.isPending}
-        />
-        <MiniTrendCard
-          label="Min (12mo)"
-          value={trend.length ? Math.min(...trend.map((d) => d.count)) : '—'}
-          loading={trendQ.isPending}
-        />
-        <MiniTrendCard
-          label="Months Tracked"
-          value={trend.length}
-          loading={trendQ.isPending}
-        />
+        <MiniTrendCard label="3-Month Avg" value={recentAvg.toFixed(0)} delta={delta} loading={trendQ.isPending} />
+        <MiniTrendCard label="Peak (12mo)" value={trend.length ? Math.max(...trend.map((d) => d.count)) : '—'} loading={trendQ.isPending} />
+        <MiniTrendCard label="Min (12mo)" value={trend.length ? Math.min(...trend.map((d) => d.count)) : '—'} loading={trendQ.isPending} />
+        <MiniTrendCard label="Months Tracked" value={trend.length} loading={trendQ.isPending} />
       </div>
 
-      {/* ── Main trend chart ─────────────────────────────────────── */}
       <ChartCard
         title="Incident Trend"
         subtitle={`${selectedSite} vs all-sites average · last 12 months`}
@@ -108,40 +87,22 @@ export function Trends() {
           <AreaChart data={trendQ.data ?? []} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
             <defs>
               <linearGradient id="siteGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                <stop offset="5%"  stopColor={ct.primary} stopOpacity={0.25} />
+                <stop offset="95%" stopColor={ct.primary} stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-            <XAxis dataKey="month_label" tick={{ fontSize: 10 }} tickLine={false} />
-            <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-            <Tooltip />
+            <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+            <XAxis dataKey="month_label" tick={{ fontSize: 10, fill: ct.axis }} tickLine={false} />
+            <YAxis tick={{ fontSize: 10, fill: ct.axis }} tickLine={false} axisLine={false} />
+            <Tooltip contentStyle={{ background: ct.tooltipBg, border: `1px solid ${ct.tooltipBorder}`, borderRadius: 8 }} />
             <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-            <Area
-              type="monotone"
-              dataKey="count"
-              stroke="#3b82f6"
-              fill="url(#siteGrad)"
-              strokeWidth={2}
-              name={selectedSite}
-              dot={false}
-            />
-            <Line
-              type="monotone"
-              dataKey="all_sites_avg"
-              stroke="#94a3b8"
-              strokeWidth={1.5}
-              strokeDasharray="4 4"
-              dot={false}
-              name="All-sites avg"
-            />
+            <Area type="monotone" dataKey="count" stroke={ct.primary} fill="url(#siteGrad)" strokeWidth={2} name={selectedSite} dot={false} />
+            <Line type="monotone" dataKey="all_sites_avg" stroke={ct.axis} strokeWidth={1.5} strokeDasharray="4 4" dot={false} name="All-sites avg" />
           </AreaChart>
         </ResponsiveContainer>
       </ChartCard>
 
-      {/* ── Category breakdown + Anomaly placeholder ─────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Category share bars */}
         <ChartCard
           title="Category Breakdown"
           subtitle={selectedQuarter}
@@ -153,41 +114,35 @@ export function Trends() {
         >
           <ResponsiveContainer width="100%" height={240}>
             <LineChart
-              data={(catsQ.data ?? []).slice(0, 8).map((c) => ({
-                name: c.category.slice(0, 20),
-                value: c.count,
-              }))}
+              data={(catsQ.data ?? []).slice(0, 8).map((c) => ({ name: c.category.slice(0, 20), value: c.count }))}
               margin={{ top: 10, right: 20, bottom: 40, left: 0 }}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="name" tick={{ fontSize: 9 }} tickLine={false} angle={-30} textAnchor="end" />
-              <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-              <Tooltip />
-              <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+              <XAxis dataKey="name" tick={{ fontSize: 9, fill: ct.axis }} tickLine={false} angle={-30} textAnchor="end" />
+              <YAxis tick={{ fontSize: 10, fill: ct.axis }} tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={{ background: ct.tooltipBg, border: `1px solid ${ct.tooltipBorder}`, borderRadius: 8 }} />
+              <Line type="monotone" dataKey="value" stroke={ct.primary} strokeWidth={2} dot={{ r: 4, fill: ct.primary }} />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        {/* Anomaly placeholder */}
-        <Card className="flex flex-col">
+        <Card className="flex flex-col card-hover animate-fade-rise">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Activity className="h-4 w-4 text-amber-500" />
+              <Activity className="h-4 w-4 text-warning" />
               Anomaly Detection
             </CardTitle>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col justify-center gap-3">
-            <div className="rounded-lg bg-amber-50 border border-amber-100 p-4 text-sm text-amber-700">
+            <div className="rounded-lg bg-warning/10 border border-warning/20 p-4 text-sm text-warning">
               Statistical anomaly detection (Z-score / isolation forest) will surface here in Phase 9.
             </div>
-            {['No critical spikes detected', 'Seasonal pattern confirmed', 'Baseline updated'].map(
-              (msg, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs text-slate-500">
-                  <span className="h-1.5 w-1.5 rounded-full bg-slate-300 shrink-0" />
-                  {msg}
-                </div>
-              ),
-            )}
+            {['No critical spikes detected', 'Seasonal pattern confirmed', 'Baseline updated'].map((msg, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 shrink-0" />
+                {msg}
+              </div>
+            ))}
           </CardContent>
         </Card>
       </div>

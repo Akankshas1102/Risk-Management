@@ -29,11 +29,11 @@ export function ChartCard({
   headerRight,
 }: ChartCardProps) {
   return (
-    <Card className={cn('flex flex-col', className)}>
+    <Card className={cn('flex flex-col card-hover animate-fade-rise', className)}>
       <CardHeader className="flex-row items-start justify-between">
         <div>
           <CardTitle>{title}</CardTitle>
-          {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
+          {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
         </div>
         {headerRight}
       </CardHeader>
@@ -42,10 +42,10 @@ export function ChartCard({
           <Skeleton className="w-full rounded-lg" style={{ height }} />
         ) : error ? (
           <div
-            className="flex flex-col items-center justify-center gap-2 text-slate-400"
+            className="flex flex-col items-center justify-center gap-2 text-muted-foreground"
             style={{ height }}
           >
-            <AlertCircle className="h-8 w-8 text-slate-300" />
+            <AlertCircle className="h-8 w-8 opacity-50" />
             <p className="text-sm">Failed to load data</p>
             {onRetry && (
               <Button variant="outline" size="sm" onClick={onRetry}>

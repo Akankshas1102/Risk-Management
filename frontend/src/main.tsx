@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ThemeProvider } from '@/context/ThemeContext'
 import { FilterProvider } from '@/context/FilterContext'
 import App from './App'
 import './index.css'
@@ -17,9 +18,11 @@ const queryClient = new QueryClient({
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <FilterProvider>
-        <App />
-      </FilterProvider>
+      <ThemeProvider>
+        <FilterProvider>
+          <App />
+        </FilterProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   </React.StrictMode>,
 )
